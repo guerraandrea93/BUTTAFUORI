@@ -7,17 +7,22 @@ class Selezione:
     cosa: str
     tipo: str
 
-def cartella_sorgente(radice_rulli: str, selezione: Selezione, codice: str) -> str:
+def cartelle_sorgenti(percorsi: dict[str, str], selezione: Selezione, codice: str) -> list[str]:
     codice = codice.strip()
-    if selezione.cosa == "RULLI" and selezione.tipo == "RICAMBIO":
-        return os.path.join(radice_rulli, "RICAMBI", "SERIE", f"Z{codice}")
-    if selezione.cosa == "ACCESSORI" and selezione.tipo == "RICAMBIO":
-        return os.path.join(radice_rulli, "ACC", "RICAMBI", "SERIE", f"Z{codice}")
-    parti = ["ACC"] if selezione.cosa == "ACCESSORI" else []
-    if selezione.tipo == "MODIFICA": parti.append("MODIFICHE")
-    elif selezione.tipo == "RICAMBIO": parti.append("RICAMBI")
-    parti.append(codice)
-    return os.path.join(radice_rulli, *parti)
+    combinazione = f"{selezione.cosa}_{selezione.tipo}"
+    nome_cartella = f"Z{codice}" if selezione.tipo == "RICAMBIO" else codice
+    cartelle = []
+    gia_aggiunte = set()
+    for indice in (1, 2):
+        radice = percorsi.get(f"{combinazione}_{indice}", "").strip()
+        if not radice:
+            continue
+        cartella = os.path.join(radice, nome_cartella)
+        chiave = os.path.normcase(os.path.normpath(cartella))
+        if chiave not in gia_aggiunte:
+            cartelle.append(cartella)
+            gia_aggiunte.add(chiave)
+    return cartelle
 
 def descrizione_sorgente(selezione: Selezione) -> str:
     return f"{selezione.cosa} / {selezione.tipo}"

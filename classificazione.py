@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass, field
 
 _MIN_RE = re.compile(r"^([MPSRT])[_\- ]?(.*)$", re.IGNORECASE)
+_REVISIONE_FINALE_RE = re.compile(r"-(\d+)$")
 
 @dataclass
 class ElementoProgramma:
@@ -30,25 +31,35 @@ def _chiave(stem: str) -> tuple[str, str | None]:
     return stem.strip(), None
 
 def leggi_cartella(cartella: str, tipo: str) -> list[ElementoProgramma]:
-    """Legge esclusivamente i file immediati (mai os.walk)."""
+    return leggi_cartelle((cartella,), tipo)
+
+
+def leggi_cartelle(cartelle, tipo: str) -> list[ElementoProgramma]:
+    """Unisce i file immediati delle cartelle indicate (mai os.walk)."""
     elementi: dict[str, ElementoProgramma] = {}
-    try: voci = os.scandir(cartella)
-    except OSError: return []
-    with voci:
-        for voce in voci:
-            if not voce.is_file(): continue
-            lower = voce.name.lower()
-            if lower.endswith(".min"):
-                base, variante = _chiave(os.path.splitext(voce.name)[0])
-                if not base: continue
-                elemento = elementi.setdefault(base.casefold(), ElementoProgramma(base))
-                if variante:
-                    elemento.varianti.add(variante); elemento.percorsi[variante] = voce.path
-            elif lower.endswith(".prt"):
-                base, _ = _chiave(os.path.splitext(voce.name)[0])
-                elemento = elementi.setdefault(base.casefold(), ElementoProgramma(base))
-                elemento.presenza_prt = True; elemento.percorsi["PRT"] = voce.path
-    risultati = list(elementi.values())
-    if tipo == "SERIE":
-        for elemento in risultati: elemento.varianti -= {"R", "T"}
+    for cartella in cartelle:
+        try: voci = os.scandir(cartella)
+        except OSError: continue
+        with voci:
+            for voce in voci:
+                if not voce.is_file(): continue
+                lower = voce.name.lower()
+                if lower.endswith(".min"):
+                    base, variante = _chiave(os.path.splitext(voce.name)[0])
+                    if not base: continue
+                    elemento = elementi.setdefault(base.casefold(), ElementoProgramma(base))
+                    if variante:
+                        elemento.varianti.add(variante); elemento.percorsi.setdefault(variante, voce.path)
+                elif lower.endswith(".prt"):
+                    base, _ = _chiave(os.path.splitext(voce.name)[0])
+                    elemento = elementi.setdefault(base.casefold(), ElementoProgramma(base))
+                    elemento.presenza_prt = True; elemento.percorsi.setdefault("PRT", voce.path)
+    risultati = elementi.values()
+    if tipo in {"SERIE", "MODIFICA"}:
+        revisione_attesa = lambda revisione: revisione == 0 if tipo == "SERIE" else revisione > 0
+        risultati = (
+            elemento for elemento in risultati
+            if (match := _REVISIONE_FINALE_RE.search(elemento.identificativo))
+            and revisione_attesa(int(match.group(1)))
+        )
     return sorted(risultati, key=lambda e: e.identificativo.casefold())
