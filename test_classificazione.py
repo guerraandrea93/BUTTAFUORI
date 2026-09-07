@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from classificazione import leggi_cartella, leggi_cartelle
+from classificazione import leggi_cartella, leggi_cartelle, leggi_note_txt
 
 
 class TestFiltroRevisioni(unittest.TestCase):
@@ -39,6 +39,14 @@ class TestFiltroRevisioni(unittest.TestCase):
         self.assertEqual(len(elementi), 1)
         self.assertEqual(elementi[0].identificativo, "14075C19-1")
         self.assertEqual(elementi[0].varianti, {"M", "P", "R"})
+
+    def test_legge_titolo_e_prima_riga_txt(self):
+        with tempfile.TemporaryDirectory() as cartella:
+            Path(cartella, "avviso.txt").write_text("Prima riga\nSeconda riga", encoding="utf-8")
+
+            note = leggi_note_txt((cartella,))
+
+        self.assertEqual([(nota.titolo, nota.prima_riga) for nota in note], [("avviso.txt", "Prima riga")])
 
 
 if __name__ == "__main__":

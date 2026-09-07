@@ -5,12 +5,12 @@ from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
 try:
-    from .classificazione import ElementoProgramma, leggi_cartelle
+    from .classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
     from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from .percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente
     from .warning import valuta
 except ImportError:
-    from classificazione import ElementoProgramma, leggi_cartelle
+    from classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
     from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente
     from warning import valuta
@@ -85,6 +85,8 @@ def main() -> None:
                 aggiorna_btn.configure(state="disabled")
                 for item in table.get_children():
                     table.delete(item)
+                for widget in note_area.winfo_children():
+                    widget.destroy()
                 stato.set("Percorso RULLI aggiornato. Verifica nuovamente la sorgente.")
             dialogo.destroy()
 
@@ -131,6 +133,8 @@ def main() -> None:
     status_bar = ttk.Frame(body)
     status_bar.pack(fill="x", pady=(0, 6))
     ttk.Label(status_bar, textvariable=stato).pack(side="left", anchor="w")
+    note_area = ttk.Frame(body)
+    note_area.pack(fill="x", pady=(0, 6))
     columns = ("PRT", "M", "P", "S", "R", "T", "warning")
     table = ttk.Treeview(body, columns=columns, show="tree headings", selectmode="extended")
     table.heading("#0", text="RULLO / ACCESSORIO")
@@ -148,16 +152,27 @@ def main() -> None:
     table.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
 
+    def mostra_note_txt(cartelle):
+        for widget in note_area.winfo_children():
+            widget.destroy()
+        for nota in leggi_note_txt(cartelle):
+            riga = tk.Frame(note_area, bg="#FFF3B0", padx=8, pady=5)
+            riga.pack(fill="x", pady=2)
+            tk.Label(riga, text=nota.titolo, bg="#FFF3B0", fg="#5C4500", font=("Segoe UI", 10, "bold")).pack(side="left")
+            tk.Label(riga, text=nota.prima_riga or "(prima riga vuota)", bg="#FFF3B0", fg="#5C4500", anchor="w").pack(side="left", fill="x", expand=True, padx=(12, 0))
+
     def carica(cartelle: list[str], mantieni_selezione: bool = False) -> None:
         selezionati = {table.item(item, "text") for item in table.selection()} if mantieni_selezione else set()
         for item in table.get_children():
             table.delete(item)
         cartelle_esistenti = [cartella for cartella in cartelle if os.path.isdir(cartella)]
         if not cartelle_esistenti:
+            mostra_note_txt(())
             cartella_corrente[0] = None
             aggiorna_btn.configure(state="disabled")
             stato.set("Sorgente non trovata: " + " | ".join(cartelle))
             return
+        mostra_note_txt(cartelle_esistenti)
         elementi: list[ElementoProgramma] = leggi_cartelle(cartelle_esistenti, tipo.get())
         cartella_corrente[0] = cartelle
         aggiorna_btn.configure(state="normal")

@@ -25,6 +25,13 @@ class ElementoProgramma:
     @property
     def presenza_t(self): return "T" in self.varianti
 
+
+@dataclass(frozen=True)
+class NotaTxt:
+    titolo: str
+    prima_riga: str
+    percorso: str
+
 def _chiave(stem: str) -> tuple[str, str | None]:
     match = _MIN_RE.match(stem)
     if match: return match.group(2).strip(), match.group(1).upper()
@@ -63,3 +70,24 @@ def leggi_cartelle(cartelle, tipo: str) -> list[ElementoProgramma]:
             and revisione_attesa(int(match.group(1)))
         )
     return sorted(risultati, key=lambda e: e.identificativo.casefold())
+
+
+def leggi_note_txt(cartelle) -> list[NotaTxt]:
+    """Legge titolo e prima riga dei soli TXT nelle cartelle indicate."""
+    note = []
+    for cartella in cartelle:
+        try:
+            voci = os.scandir(cartella)
+        except OSError:
+            continue
+        with voci:
+            for voce in voci:
+                if not voce.is_file() or not voce.name.lower().endswith(".txt"):
+                    continue
+                try:
+                    with open(voce.path, "r", encoding="utf-8-sig", errors="replace") as file_txt:
+                        prima_riga = file_txt.readline().rstrip("\r\n")
+                except OSError:
+                    prima_riga = "[Impossibile leggere il file]"
+                note.append(NotaTxt(voce.name, prima_riga, voce.path))
+    return sorted(note, key=lambda nota: nota.titolo.casefold())
