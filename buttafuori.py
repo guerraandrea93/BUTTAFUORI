@@ -7,12 +7,12 @@ from tkinter import filedialog, messagebox, ttk
 
 try:
     from .classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
-    from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
+    from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from .percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from .warning import valuta
 except ImportError:
     from classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
-    from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
+    from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from warning import valuta
 
@@ -38,8 +38,11 @@ def main() -> None:
         dialogo.grab_set()
         dialogo.resizable(True, False)
         etichette = {
-            nome: nome.removeprefix("TORNI_").rsplit("_", 1)[0].replace("_", " - ")
-            + " " + nome.rsplit("_", 1)[1]
+            nome: ETICHETTE_TORNI.get(
+                nome,
+                nome.rsplit("_", 1)[0].replace("_", " - ")
+                + " " + nome.rsplit("_", 1)[1],
+            )
             for nome in chiavi_percorsi
         }
         valori = {nome: tk.StringVar(value=percorsi[nome]) for nome in chiavi_percorsi}
@@ -60,9 +63,12 @@ def main() -> None:
 
         def salva():
             nuovi = {nome: valori[nome].get().strip() for nome in chiavi_percorsi}
+            obbligatorie = set(CHIAVI_TORNI) | {
+                nome for nome in CHIAVI_SORGENTI if nome.endswith("_1")
+            }
             non_validi = [
                 nome for nome, percorso in nuovi.items()
-                if (not percorso and (nome.endswith("_1") or nome == "TORNI"))
+                if (not percorso and nome in obbligatorie)
                 or (percorso and not os.path.isdir(percorso))
             ]
             if non_validi:
