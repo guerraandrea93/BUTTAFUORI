@@ -23,9 +23,11 @@ def main() -> None:
     root.minsize(820, 520)
     percorsi = inizializza_percorsi()
     cosa, tipo, codice = tk.StringVar(), tk.StringVar(), tk.StringVar()
+    ordinamento = tk.StringVar(value="ALFABETICO")
     stato = tk.StringVar(value="Seleziona COSA e TIPO, poi inserisci un codice SERIE.")
     recenti_frame = ttk.Frame(root)
     cartella_corrente = [None]
+    elementi_correnti: dict[str, ElementoProgramma] = {}
 
     def apri_configurazione_percorsi(titolo, chiavi_percorsi):
         dialogo = tk.Toplevel(root)
@@ -127,30 +129,73 @@ def main() -> None:
     tk.Label(controls, text="SERIE", bg=COLORE_AZZURRO, fg=COLORE_TESTO, width=10, anchor="w", font=("Segoe UI", 10, "bold")).grid(row=2, column=0, padx=10, pady=5, sticky="w")
     entry = ttk.Entry(controls, textvariable=codice, width=28)
     entry.grid(row=2, column=1, columnspan=2, padx=12, pady=5, sticky="ew")
+    tk.Label(
+        controls, text="ORDINA", bg=COLORE_AZZURRO, fg=COLORE_TESTO,
+        width=10, anchor="w", font=("Segoe UI", 10, "bold"),
+    ).grid(row=3, column=0, padx=10, pady=5, sticky="w")
+    ttk.Radiobutton(
+        controls, text="ALFABETICO", value="ALFABETICO", variable=ordinamento,
+    ).grid(row=3, column=1, padx=8, pady=5, sticky="w")
+    ttk.Radiobutton(
+        controls, text="ULTIMA MODIFICA", value="ULTIMA MODIFICA", variable=ordinamento,
+    ).grid(row=3, column=2, padx=8, pady=5, sticky="w")
 
-    body = ttk.Frame(root)
+    body = ttk.Panedwindow(root, orient="horizontal")
     body.pack(fill="both", expand=True, padx=14, pady=(0, 14))
-    status_bar = ttk.Frame(body)
+    sinistra = ttk.Frame(body)
+    destra = ttk.LabelFrame(body, text="DESTINAZIONI PREVISTE")
+    body.add(sinistra, weight=3)
+    body.add(destra, weight=2)
+    status_bar = ttk.Frame(sinistra)
     status_bar.pack(fill="x", pady=(0, 6))
     ttk.Label(status_bar, textvariable=stato).pack(side="left", anchor="w")
-    note_area = ttk.Frame(body)
+    note_area = ttk.Frame(sinistra)
     note_area.pack(fill="x", pady=(0, 6))
-    columns = ("PRT", "M", "P", "S", "R", "T", "warning")
-    table = ttk.Treeview(body, columns=columns, show="tree headings", selectmode="extended")
+    columns = ("PRT", "M", "P", "S", "R", "T", "modifica", "warning")
+    table = ttk.Treeview(sinistra, columns=columns, show="tree headings", selectmode="extended")
     table.heading("#0", text="RULLO / ACCESSORIO")
     table.column("#0", width=260, anchor="w")
-    for col in columns[:-1]:
+    for col in ("PRT", "M", "P", "S", "R", "T"):
         table.heading(col, text=col)
-        table.column(col, width=55, anchor="center")
+        table.column(col, width=45, anchor="center")
+    table.heading("modifica", text="ULTIMA MODIFICA")
+    table.column("modifica", width=135, anchor="center")
     table.heading("warning", text="WARNING VISIVO")
     table.column("warning", width=320, anchor="w")
     table.tag_configure("pari", background=COLORE_RIGA_ALTERNATA)
     table.tag_configure("dispari", background="white")
     table.tag_configure("warning", background="#FFFBE6", foreground="#7A4B00")
-    scroll = ttk.Scrollbar(body, orient="vertical", command=table.yview)
+    scroll = ttk.Scrollbar(sinistra, orient="vertical", command=table.yview)
     table.configure(yscrollcommand=scroll.set)
     table.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
+
+    ttk.Label(
+        destra,
+        text="Seleziona uno o più programmi per vedere le cartelle in cui verranno copiati.",
+        wraplength=360,
+        justify="left",
+    ).pack(fill="x", padx=10, pady=(8, 6))
+    colonne_destinazione = ("programma", "cartella", "stato")
+    tabella_destinazioni = ttk.Treeview(
+        destra, columns=colonne_destinazione, show="headings", selectmode="none",
+    )
+    tabella_destinazioni.heading("programma", text="PROGRAMMA")
+    tabella_destinazioni.heading("cartella", text="CARTELLA")
+    tabella_destinazioni.heading("stato", text="STATO")
+    tabella_destinazioni.column("programma", width=130, anchor="w")
+    tabella_destinazioni.column("cartella", width=230, anchor="w")
+    tabella_destinazioni.column("stato", width=90, anchor="center")
+    tabella_destinazioni.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+    def aggiorna_destinazioni(*_):
+        for item in tabella_destinazioni.get_children():
+            tabella_destinazioni.delete(item)
+        for item in table.selection():
+            identificativo = table.item(item, "text")
+            tabella_destinazioni.insert(
+                "", "end", values=(identificativo, "Regole da configurare", "IN ATTESA"),
+            )
 
     def mostra_note_txt(cartelle):
         for widget in note_area.winfo_children():
@@ -165,6 +210,8 @@ def main() -> None:
         selezionati = {table.item(item, "text") for item in table.selection()} if mantieni_selezione else set()
         for item in table.get_children():
             table.delete(item)
+        elementi_correnti.clear()
+        aggiorna_destinazioni()
         cartelle_esistenti = [cartella for cartella in cartelle if os.path.isdir(cartella)]
         if not cartelle_esistenti:
             mostra_note_txt(())
@@ -174,6 +221,26 @@ def main() -> None:
             return
         mostra_note_txt(cartelle_esistenti)
         elementi: list[ElementoProgramma] = leggi_cartelle(cartelle_esistenti, tipo.get())
+
+        def ultima_modifica(elemento: ElementoProgramma) -> float:
+            date = []
+            for percorso in elemento.percorsi.values():
+                try:
+                    date.append(os.path.getmtime(percorso))
+                except OSError:
+                    continue
+            return max(date, default=0.0)
+
+        if ordinamento.get() == "ULTIMA MODIFICA":
+            elementi.sort(
+                key=lambda elemento: (ultima_modifica(elemento), elemento.identificativo.casefold()),
+                reverse=True,
+            )
+        else:
+            elementi.sort(key=lambda elemento: elemento.identificativo.casefold())
+        elementi_correnti.update(
+            (elemento.identificativo, elemento) for elemento in elementi
+        )
         cartella_corrente[0] = cartelle
         aggiorna_btn.configure(state="normal")
         da_selezionare = []
@@ -184,12 +251,18 @@ def main() -> None:
                 elemento.presenza_s, elemento.presenza_r, elemento.presenza_t,
             ))
             tag = "warning" if warning else ("pari" if index % 2 == 0 else "dispari")
-            item_id = table.insert("", "end", text=elemento.identificativo,
-                                   values=(*flags, "⚠ " + "; ".join(warning) if warning else ""), tags=(tag,))
+            timestamp = ultima_modifica(elemento)
+            modifica = datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y %H:%M") if timestamp else "—"
+            item_id = table.insert(
+                "", "end", text=elemento.identificativo,
+                values=(*flags, modifica, "⚠ " + "; ".join(warning) if warning else ""),
+                tags=(tag,),
+            )
             if elemento.identificativo in selezionati:
                 da_selezionare.append(item_id)
         if da_selezionare:
             table.selection_set(da_selezionare)
+        aggiorna_destinazioni()
         stato.set(f"{' | '.join(cartelle_esistenti)} - {len(elementi)} elementi")
 
     def verifica():
@@ -245,6 +318,8 @@ def main() -> None:
 
     cosa.trace_add("write", abilita_recenti)
     tipo.trace_add("write", abilita_recenti)
+    ordinamento.trace_add("write", lambda *_: aggiorna())
+    table.bind("<<TreeviewSelect>>", aggiorna_destinazioni)
     aggiorna_btn = ttk.Button(status_bar, text="↻ AGGIORNA", command=aggiorna, state="disabled")
     aggiorna_btn.pack(side="right")
     latest_btn = ttk.Button(controls, text="ULTIME MODIFICATE", command=mostra_recenti, state="disabled")
