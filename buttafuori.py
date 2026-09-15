@@ -8,12 +8,12 @@ from tkinter import filedialog, messagebox, ttk
 try:
     from .classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
     from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
-    from .percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
+    from .percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from .warning import valuta
 except ImportError:
     from classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
     from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
-    from percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
+    from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from warning import valuta
 
 
@@ -30,6 +30,8 @@ def main() -> None:
     cartella_corrente = [None]
     elementi_correnti: dict[str, ElementoProgramma] = {}
     piano_corrente = []
+    destinazione_personalizzata = [None]
+    selezione_piano = [()]
 
     def apri_configurazione_percorsi(titolo, chiavi_percorsi):
         dialogo = tk.Toplevel(root)
@@ -194,8 +196,24 @@ def main() -> None:
     tabella_destinazioni.heading("stato", text="STATO")
     tabella_destinazioni.column("programma", width=130, anchor="w")
     tabella_destinazioni.column("cartella", width=230, anchor="w")
-    tabella_destinazioni.column("stato", width=90, anchor="center")
+    tabella_destinazioni.column("stato", width=130, anchor="center")
     tabella_destinazioni.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+    pulsanti_destinazione = ttk.Frame(destra)
+    pulsanti_destinazione.pack(fill="x", padx=10, pady=(0, 8))
+    cambia_dest_btn = ttk.Button(
+        pulsanti_destinazione,
+        text="CAMBIA DESTINAZIONE...",
+        state="disabled",
+        command=lambda: cambia_destinazione(),
+    )
+    cambia_dest_btn.pack(side="left", fill="x", expand=True)
+    ripristina_dest_btn = ttk.Button(
+        pulsanti_destinazione,
+        text="RIPRISTINA REGOLA",
+        state="disabled",
+        command=lambda: ripristina_destinazione(),
+    )
+    ripristina_dest_btn.pack(side="left", fill="x", expand=True, padx=(8, 0))
     copia_btn = ttk.Button(
         destra, text="COPIA PROGRAMMI", state="disabled",
         command=lambda: copia_programmi(),
@@ -206,12 +224,18 @@ def main() -> None:
         for item in tabella_destinazioni.get_children():
             tabella_destinazioni.delete(item)
         piano_corrente.clear()
-        selezionati = [
-            elementi_correnti[table.item(item, "text")]
+        identificativi = tuple(sorted(
+            table.item(item, "text")
             for item in table.selection()
             if table.item(item, "text") in elementi_correnti
-        ]
+        ))
+        if identificativi != selezione_piano[0]:
+            destinazione_personalizzata[0] = None
+            selezione_piano[0] = identificativi
+        selezionati = [elementi_correnti[nome] for nome in identificativi]
         if not selezionati or cartella_corrente[0] is None:
+            cambia_dest_btn.configure(state="disabled")
+            ripristina_dest_btn.configure(state="disabled")
             copia_btn.configure(state="disabled")
             return
         try:
@@ -224,8 +248,14 @@ def main() -> None:
             )
         except ValueError as exc:
             tabella_destinazioni.insert("", "end", values=("ERRORE", str(exc), "BLOCCATO"))
+            cambia_dest_btn.configure(state="disabled")
+            ripristina_dest_btn.configure(state="disabled")
             copia_btn.configure(state="disabled")
             return
+        if destinazione_personalizzata[0]:
+            piano = applica_destinazione_temporanea(
+                piano, destinazione_personalizzata[0]
+            )
         piano_corrente.extend(piano)
         for operazione in piano:
             if os.path.isfile(operazione.destinazione):
@@ -234,11 +264,44 @@ def main() -> None:
                 esito = "ESISTE"
             else:
                 esito = "DA CREARE"
+            if destinazione_personalizzata[0]:
+                esito = "MANUALE · " + esito
             tabella_destinazioni.insert(
                 "", "end",
                 values=(operazione.nome_file, operazione.cartella_destinazione, esito),
             )
-        copia_btn.configure(state="normal" if piano_corrente else "disabled")
+        attivo = "normal" if piano_corrente else "disabled"
+        cambia_dest_btn.configure(state=attivo)
+        ripristina_dest_btn.configure(
+            state="normal" if destinazione_personalizzata[0] else "disabled"
+        )
+        copia_btn.configure(state=attivo)
+
+    def cambia_destinazione():
+        if not piano_corrente:
+            return
+        iniziale = piano_corrente[0].cartella_destinazione
+        while iniziale and not os.path.isdir(iniziale):
+            genitore = os.path.dirname(iniziale)
+            if genitore == iniziale:
+                iniziale = ""
+                break
+            iniziale = genitore
+        opzioni = {
+            "parent": root,
+            "title": "Destinazione temporanea per i file selezionati",
+            "mustexist": True,
+        }
+        if iniziale:
+            opzioni["initialdir"] = iniziale
+        scelta = filedialog.askdirectory(**opzioni)
+        if scelta:
+            destinazione_personalizzata[0] = scelta
+            aggiorna_destinazioni()
+
+    def ripristina_destinazione():
+        destinazione_personalizzata[0] = None
+        aggiorna_destinazioni()
 
     def copia_programmi():
         if not piano_corrente:
@@ -268,6 +331,8 @@ def main() -> None:
                 copiati += 1
             except OSError as exc:
                 errori.append(f"{operazione.nome_file}: {exc}")
+        if not errori:
+            destinazione_personalizzata[0] = None
         aggiorna_destinazioni()
         if errori:
             messagebox.showwarning(
@@ -294,6 +359,9 @@ def main() -> None:
 
     def carica(cartelle: list[str], mantieni_selezione: bool = False) -> None:
         selezionati = {table.item(item, "text") for item in table.selection()} if mantieni_selezione else set()
+        if not mantieni_selezione:
+            destinazione_personalizzata[0] = None
+            selezione_piano[0] = ()
         for item in table.get_children():
             table.delete(item)
         elementi_correnti.clear()
