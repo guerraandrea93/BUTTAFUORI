@@ -34,23 +34,6 @@ def _aggiungi_unica(cartelle: list[str], gia_aggiunte: set[str], cartella: str) 
         gia_aggiunte.add(chiave)
 
 
-def _cerca_cartella(radice: str, nome: str, profondita_massima: int = 2) -> list[str]:
-    """Cerca una cartella per nome sotto la radice, limitando la profondità."""
-    trovate = []
-    if not os.path.isdir(radice):
-        return trovate
-    radice = os.path.normpath(radice)
-    for corrente, directory, _ in os.walk(radice):
-        relativo = os.path.relpath(corrente, radice)
-        profondita = 0 if relativo == "." else len(relativo.split(os.sep))
-        if profondita >= profondita_massima:
-            directory[:] = []
-        for nome_directory in directory:
-            if nome_directory.casefold() == nome.casefold():
-                trovate.append(os.path.join(corrente, nome_directory))
-    return trovate
-
-
 def cartelle_sorgenti(percorsi: dict[str, str], selezione: Selezione, codice: str) -> list[str]:
     codice = codice.strip()
     combinazione = f"{selezione.cosa}_{selezione.tipo}"
@@ -59,18 +42,10 @@ def cartelle_sorgenti(percorsi: dict[str, str], selezione: Selezione, codice: st
     gia_aggiunte = set()
     for indice in (1, 2):
         radice = percorsi.get(f"{combinazione}_{indice}", "").strip()
-        if not radice:
-            continue
-        diretta = os.path.join(radice, nome_cartella)
-        if os.path.isdir(diretta):
-            _aggiungi_unica(cartelle, gia_aggiunte, diretta)
-            continue
-        trovate = _cerca_cartella(radice, nome_cartella) if selezione.tipo == "RICAMBIO" else []
-        if trovate:
-            for cartella in trovate:
-                _aggiungi_unica(cartelle, gia_aggiunte, cartella)
-        else:
-            _aggiungi_unica(cartelle, gia_aggiunte, diretta)
+        if radice:
+            _aggiungi_unica(
+                cartelle, gia_aggiunte, os.path.join(radice, nome_cartella)
+            )
     return cartelle
 
 
@@ -97,19 +72,21 @@ def ricava_serie_ricambio(cartelle_sorgente) -> str:
     )
 
 
-def _radici_torni(percorsi: dict[str, str], selezione: Selezione) -> list[str]:
-    combinazione = f"{selezione.cosa}_{selezione.tipo}"
-    radici = []
-    gia_aggiunte = set()
-    for indice in (1, 2):
-        radice = percorsi.get(f"TORNI_{combinazione}_{indice}", "").strip()
-        if radice:
-            _aggiungi_unica(radici, gia_aggiunte, radice)
-    return radici
+def _chiavi_richieste(selezione: Selezione) -> tuple[str, ...]:
+    caso = (selezione.cosa, selezione.tipo)
+    if caso == ("RULLI", "SERIE"):
+        return ("TORNI_SGROSSATURA", "TORNI_FINITURA")
+    if caso in {("RULLI", "MODIFICA"), ("RULLI", "RICAMBIO")}:
+        return ("TORNI_MODIFICHE",)
+    if caso == ("ACCESSORI", "SERIE"):
+        return ("TORNI_ACC_SERIE",)
+    if caso in {("ACCESSORI", "MODIFICA"), ("ACCESSORI", "RICAMBIO")}:
+        return ("TORNI_ACC_MODIFICHE",)
+    raise ValueError(f"Combinazione non gestita: {selezione.cosa} / {selezione.tipo}")
 
 
 def _destinazione(
-    radice: str,
+    percorsi: dict[str, str],
     selezione: Selezione,
     serie: str,
     cartella_z: str,
@@ -118,20 +95,24 @@ def _destinazione(
 ) -> str:
     caso = (selezione.cosa, selezione.tipo)
     if caso == ("RULLI", "SERIE"):
-        reparto = "SGROSSATURA" if variante == "M" else "FINITURA"
-        return os.path.join(radice, reparto, serie)
+        chiave = "TORNI_SGROSSATURA" if variante == "M" else "TORNI_FINITURA"
+        return os.path.join(percorsi[chiave], serie)
     if caso == ("RULLI", "MODIFICA"):
-        return os.path.join(radice, "MODIFICHE", serie, giorno.strftime("%d-%m-%y"))
+        return os.path.join(
+            percorsi["TORNI_MODIFICHE"], serie, giorno.strftime("%d-%m-%y")
+        )
     if caso == ("RULLI", "RICAMBIO"):
-        return os.path.join(radice, "MODIFICHE", cartella_z, serie)
+        return os.path.join(percorsi["TORNI_MODIFICHE"], cartella_z, serie)
     if caso == ("ACCESSORI", "SERIE"):
-        return os.path.join(radice, "ACCESSORI", serie)
+        return os.path.join(percorsi["TORNI_ACC_SERIE"], serie)
     if caso == ("ACCESSORI", "MODIFICA"):
         return os.path.join(
-            radice, "ACCESSORI", "MODIFICHE", serie, giorno.strftime("%d-%m-%y")
+            percorsi["TORNI_ACC_MODIFICHE"], serie, giorno.strftime("%d-%m-%y")
         )
     if caso == ("ACCESSORI", "RICAMBIO"):
-        return os.path.join(radice, "ACCESSORI", "MODIFICHE", cartella_z, serie)
+        return os.path.join(
+            percorsi["TORNI_ACC_MODIFICHE"], cartella_z, serie
+        )
     raise ValueError(f"Combinazione non gestita: {selezione.cosa} / {selezione.tipo}")
 
 
@@ -153,29 +134,35 @@ def pianifica_destinazioni(
     if not serie:
         raise ValueError("Codice serie mancante.")
 
+    mancanti = [
+        chiave for chiave in _chiavi_richieste(selezione)
+        if not percorsi.get(chiave, "").strip()
+        or not os.path.isdir(percorsi[chiave])
+    ]
+    if mancanti:
+        raise ValueError(
+            "Configura una cartella base TORNI esistente per: "
+            + ", ".join(mancanti)
+        )
+
     consentite = (
         {"M", "P", "S", "R", "T"}
         if selezione.tipo == "MODIFICA"
         else {"M", "P", "S"}
     )
-    radici = _radici_torni(percorsi, selezione)
-    if not radici:
-        raise ValueError("Nessun percorso TORNI configurato per questa combinazione.")
-
     operazioni = []
     for elemento in elementi:
         for variante, sorgente in sorted(elemento.percorsi.items()):
             if variante not in consentite:
                 continue
-            for radice in radici:
-                operazioni.append(
-                    OperazioneCopia(
-                        programma=elemento.identificativo,
-                        variante=variante,
-                        sorgente=sorgente,
-                        cartella_destinazione=_destinazione(
-                            radice, selezione, serie, cartella_z, variante, giorno
-                        ),
-                    )
+            operazioni.append(
+                OperazioneCopia(
+                    programma=elemento.identificativo,
+                    variante=variante,
+                    sorgente=sorgente,
+                    cartella_destinazione=_destinazione(
+                        percorsi, selezione, serie, cartella_z, variante, giorno
+                    ),
                 )
+            )
     return operazioni
