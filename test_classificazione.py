@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from classificazione import ElementoProgramma, leggi_cartella, leggi_cartelle, leggi_note_txt
+from funzioni import CHIAVI_TORNI, ETICHETTE_TORNI
 from percorsi import Selezione, pianifica_destinazioni, ricava_serie_ricambio
 
 
@@ -54,7 +55,11 @@ class TestFiltroRevisioni(unittest.TestCase):
 
 class TestDestinazioni(unittest.TestCase):
     def setUp(self):
-        self.radice = os.path.join("TORNIO")
+        self.sgrossatura = os.path.join("TORNIO", "SGROSSATURA")
+        self.finitura = os.path.join("TORNIO", "FINITURA")
+        self.modifiche = os.path.join("TORNIO", "MODIFICHE")
+        self.acc_serie = os.path.join("TORNIO", "ACC", "SERIE")
+        self.acc_modifiche = os.path.join("TORNIO", "ACC", "MODIFICHE")
         self.elemento = ElementoProgramma(
             "25040-0",
             varianti={"M", "P", "S", "R", "T"},
@@ -65,20 +70,51 @@ class TestDestinazioni(unittest.TestCase):
         )
         self.giorno = date(2026, 9, 15)
 
-    def _percorsi(self, cosa, tipo):
+    def _percorsi(self):
         return {
-            f"TORNI_{cosa}_{tipo}_1": self.radice,
-            f"TORNI_{cosa}_{tipo}_2": "",
+            "TORNI_SGROSSATURA": self.sgrossatura,
+            "TORNI_FINITURA": self.finitura,
+            "TORNI_MODIFICHE": self.modifiche,
+            "TORNI_ACC_SERIE": self.acc_serie,
+            "TORNI_ACC_MODIFICHE": self.acc_modifiche,
         }
 
     def _piano(self, cosa, tipo, codice="25040", sorgenti=("SORGENE",)):
-        return pianifica_destinazioni(
-            self._percorsi(cosa, tipo),
-            Selezione(cosa, tipo),
-            codice,
-            [self.elemento],
-            sorgenti,
-            self.giorno,
+        percorsi = self._percorsi()
+        original_isdir = os.path.isdir
+        try:
+            os.path.isdir = lambda percorso: percorso in percorsi.values()
+            return pianifica_destinazioni(
+                percorsi,
+                Selezione(cosa, tipo),
+                codice,
+                [self.elemento],
+                sorgenti,
+                self.giorno,
+            )
+        finally:
+            os.path.isdir = original_isdir
+
+    def test_configura_esattamente_cinque_cartelle_torni(self):
+        self.assertEqual(
+            CHIAVI_TORNI,
+            (
+                "TORNI_SGROSSATURA",
+                "TORNI_FINITURA",
+                "TORNI_MODIFICHE",
+                "TORNI_ACC_SERIE",
+                "TORNI_ACC_MODIFICHE",
+            ),
+        )
+        self.assertEqual(
+            set(ETICHETTE_TORNI.values()),
+            {
+                "TORNIO / SGROSSATURA",
+                "TORNIO / FINITURA",
+                "TORNIO / MODIFICHE",
+                "TORNIO / ACC / SERIE",
+                "TORNIO / ACC / MODIFICHE",
+            },
         )
 
     def test_rulli_serie_divide_sgrossatura_e_finitura(self):
@@ -89,10 +125,10 @@ class TestDestinazioni(unittest.TestCase):
         }
         self.assertEqual(set(destinazioni), {"M", "P", "S"})
         self.assertEqual(
-            destinazioni["M"], os.path.join(self.radice, "SGROSSATURA", "25040")
+            destinazioni["M"], os.path.join(self.sgrossatura, "25040")
         )
         self.assertEqual(
-            destinazioni["P"], os.path.join(self.radice, "FINITURA", "25040")
+            destinazioni["P"], os.path.join(self.finitura, "25040")
         )
         self.assertEqual(destinazioni["P"], destinazioni["S"])
 
@@ -101,7 +137,7 @@ class TestDestinazioni(unittest.TestCase):
         self.assertEqual({operazione.variante for operazione in piano}, set("MPSRT"))
         self.assertTrue(all(
             operazione.cartella_destinazione
-            == os.path.join(self.radice, "MODIFICHE", "25040", "15-09-26")
+            == os.path.join(self.modifiche, "25040", "15-09-26")
             for operazione in piano
         ))
 
@@ -112,7 +148,7 @@ class TestDestinazioni(unittest.TestCase):
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
             operazione.cartella_destinazione
-            == os.path.join(self.radice, "MODIFICHE", "Z30100", "25010")
+            == os.path.join(self.modifiche, "Z30100", "25010")
             for operazione in piano
         ))
 
@@ -121,7 +157,7 @@ class TestDestinazioni(unittest.TestCase):
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
             operazione.cartella_destinazione
-            == os.path.join(self.radice, "ACCESSORI", "25040")
+            == os.path.join(self.acc_serie, "25040")
             for operazione in piano
         ))
 
@@ -130,9 +166,7 @@ class TestDestinazioni(unittest.TestCase):
         self.assertEqual({operazione.variante for operazione in piano}, set("MPSRT"))
         self.assertTrue(all(
             operazione.cartella_destinazione
-            == os.path.join(
-                self.radice, "ACCESSORI", "MODIFICHE", "25040", "15-09-26"
-            )
+            == os.path.join(self.acc_modifiche, "25040", "15-09-26")
             for operazione in piano
         ))
 
@@ -142,9 +176,7 @@ class TestDestinazioni(unittest.TestCase):
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
             operazione.cartella_destinazione
-            == os.path.join(
-                self.radice, "ACCESSORI", "MODIFICHE", "Z30100", "25010"
-            )
+            == os.path.join(self.acc_modifiche, "Z30100", "25010")
             for operazione in piano
         ))
 
