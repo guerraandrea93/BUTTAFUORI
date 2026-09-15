@@ -6,7 +6,7 @@ from pathlib import Path
 
 from classificazione import ElementoProgramma, leggi_cartella, leggi_cartelle, leggi_note_txt
 from funzioni import CHIAVI_TORNI, ETICHETTE_TORNI
-from percorsi import Selezione, pianifica_destinazioni, ricava_serie_ricambio
+from percorsi import Selezione, applica_destinazione_temporanea, pianifica_destinazioni, ricava_serie_ricambio
 
 
 class TestFiltroRevisioni(unittest.TestCase):
@@ -179,6 +179,24 @@ class TestDestinazioni(unittest.TestCase):
             == os.path.join(self.acc_modifiche, "Z30100", "25010")
             for operazione in piano
         ))
+
+    def test_destinazione_temporanea_si_applica_al_piano_selezionato(self):
+        piano = self._piano("RULLI", "MODIFICA")
+        cartella_manual = os.path.join(self.modifiche, "25040", "12-09-26")
+        modificato = applica_destinazione_temporanea(piano, cartella_manual)
+        self.assertEqual(len(modificato), len(piano))
+        self.assertTrue(all(
+            operazione.cartella_destinazione == cartella_manual
+            for operazione in modificato
+        ))
+        self.assertEqual(
+            [operazione.sorgente for operazione in modificato],
+            [operazione.sorgente for operazione in piano],
+        )
+        self.assertNotEqual(
+            modificato[0].cartella_destinazione,
+            piano[0].cartella_destinazione,
+        )
 
 
 if __name__ == "__main__":
