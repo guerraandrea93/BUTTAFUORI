@@ -1,7 +1,7 @@
 """Costruzione dei percorsi sorgente e delle destinazioni TORNI."""
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 
@@ -25,6 +25,19 @@ class OperazioneCopia:
     @property
     def destinazione(self) -> str:
         return os.path.join(self.cartella_destinazione, self.nome_file)
+
+
+def applica_destinazione_temporanea(
+    operazioni: list[OperazioneCopia], cartella: str
+) -> list[OperazioneCopia]:
+    """Sposta l'intero piano selezionato in una cartella solo per questa copia."""
+    cartella = cartella.strip()
+    if not cartella:
+        raise ValueError("Cartella di destinazione manuale mancante.")
+    return [
+        replace(operazione, cartella_destinazione=cartella)
+        for operazione in operazioni
+    ]
 
 
 def _aggiungi_unica(cartelle: list[str], gia_aggiunte: set[str], cartella: str) -> None:
