@@ -1,5 +1,6 @@
 """GUI principale: selezione e verifica delle sorgenti RULLI."""
 import os
+import shutil
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
@@ -7,12 +8,12 @@ from tkinter import filedialog, messagebox, ttk
 try:
     from .classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
     from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
-    from .percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente
+    from .percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from .warning import valuta
 except ImportError:
     from classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
     from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
-    from percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente
+    from percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from warning import valuta
 
 
@@ -28,6 +29,7 @@ def main() -> None:
     recenti_frame = ttk.Frame(root)
     cartella_corrente = [None]
     elementi_correnti: dict[str, ElementoProgramma] = {}
+    piano_corrente = []
 
     def apri_configurazione_percorsi(titolo, chiavi_percorsi):
         dialogo = tk.Toplevel(root)
@@ -82,6 +84,7 @@ def main() -> None:
                 for nome in chiavi_percorsi
             )
             percorsi.update(nuovi)
+            aggiorna_destinazioni()
             if sorgenti_modificate:
                 cartella_corrente[0] = None
                 aggiorna_btn.configure(state="disabled")
@@ -180,21 +183,98 @@ def main() -> None:
     tabella_destinazioni = ttk.Treeview(
         destra, columns=colonne_destinazione, show="headings", selectmode="none",
     )
-    tabella_destinazioni.heading("programma", text="PROGRAMMA")
+    tabella_destinazioni.heading("programma", text="FILE")
     tabella_destinazioni.heading("cartella", text="CARTELLA")
     tabella_destinazioni.heading("stato", text="STATO")
     tabella_destinazioni.column("programma", width=130, anchor="w")
     tabella_destinazioni.column("cartella", width=230, anchor="w")
     tabella_destinazioni.column("stato", width=90, anchor="center")
-    tabella_destinazioni.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    tabella_destinazioni.pack(fill="both", expand=True, padx=10, pady=(0, 8))
+    copia_btn = ttk.Button(
+        destra, text="COPIA PROGRAMMI", state="disabled",
+        command=lambda: copia_programmi(),
+    )
+    copia_btn.pack(fill="x", padx=10, pady=(0, 10))
 
     def aggiorna_destinazioni(*_):
         for item in tabella_destinazioni.get_children():
             tabella_destinazioni.delete(item)
-        for item in table.selection():
-            identificativo = table.item(item, "text")
+        piano_corrente.clear()
+        selezionati = [
+            elementi_correnti[table.item(item, "text")]
+            for item in table.selection()
+            if table.item(item, "text") in elementi_correnti
+        ]
+        if not selezionati or cartella_corrente[0] is None:
+            copia_btn.configure(state="disabled")
+            return
+        try:
+            piano = pianifica_destinazioni(
+                percorsi,
+                Selezione(cosa.get(), tipo.get()),
+                codice.get(),
+                selezionati,
+                cartella_corrente[0],
+            )
+        except ValueError as exc:
+            tabella_destinazioni.insert("", "end", values=("ERRORE", str(exc), "BLOCCATO"))
+            copia_btn.configure(state="disabled")
+            return
+        piano_corrente.extend(piano)
+        for operazione in piano:
+            if os.path.isfile(operazione.destinazione):
+                esito = "SOVRASCRIVE"
+            elif os.path.isdir(operazione.cartella_destinazione):
+                esito = "ESISTE"
+            else:
+                esito = "DA CREARE"
             tabella_destinazioni.insert(
-                "", "end", values=(identificativo, "Regole da configurare", "IN ATTESA"),
+                "", "end",
+                values=(operazione.nome_file, operazione.cartella_destinazione, esito),
+            )
+        copia_btn.configure(state="normal" if piano_corrente else "disabled")
+
+    def copia_programmi():
+        if not piano_corrente:
+            return
+        cartelle = {operazione.cartella_destinazione for operazione in piano_corrente}
+        sovrascritture = sum(
+            os.path.isfile(operazione.destinazione) for operazione in piano_corrente
+        )
+        dettaglio = (
+            f"File da copiare: {len(piano_corrente)}\n"
+            f"Cartelle interessate: {len(cartelle)}"
+        )
+        if sovrascritture:
+            dettaglio += f"\nFile esistenti da sovrascrivere: {sovrascritture}"
+        if not messagebox.askyesno(
+            "Conferma copia",
+            dettaglio + "\n\nProcedere con la copia?",
+            parent=root,
+        ):
+            return
+        errori = []
+        copiati = 0
+        for operazione in piano_corrente:
+            try:
+                os.makedirs(operazione.cartella_destinazione, exist_ok=True)
+                shutil.copy2(operazione.sorgente, operazione.destinazione)
+                copiati += 1
+            except OSError as exc:
+                errori.append(f"{operazione.nome_file}: {exc}")
+        aggiorna_destinazioni()
+        if errori:
+            messagebox.showwarning(
+                "Copia completata con errori",
+                f"Copiati: {copiati}\nErrori: {len(errori)}\n\n"
+                + "\n".join(errori[:10]),
+                parent=root,
+            )
+        else:
+            messagebox.showinfo(
+                "Copia completata",
+                f"Copiati correttamente {copiati} file.",
+                parent=root,
             )
 
     def mostra_note_txt(cartelle):
@@ -330,7 +410,9 @@ def main() -> None:
     footer = ttk.Frame(root)
     footer.pack(fill="x", padx=14, pady=(0, 12))
     ttk.Button(footer, text="SELEZIONA TUTTI", command=lambda: table.selection_set(table.get_children())).pack(side="left")
-    ttk.Button(footer, text="AVANTI", command=lambda: messagebox.showinfo("Fase 2", "La verifica TORNI e la copia saranno implementate nella Fase 2.")).pack(side="right")
+    ttk.Label(
+        footer, text="Controlla le destinazioni a destra prima di copiare."
+    ).pack(side="right")
     root.mainloop()
 
 
