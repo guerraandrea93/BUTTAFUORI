@@ -98,7 +98,6 @@ class TestDestinazioni(unittest.TestCase):
         self.modifiche = os.path.join("TORNIO", "MODIFICHE")
         self.acc_serie = os.path.join("TORNIO", "ACC", "SERIE")
         self.acc_modifiche = os.path.join("TORNIO", "ACC", "MODIFICHE")
-        self.acc_ricambi = os.path.join("TORNIO", "ACCESSORI", "RICAMBI")
         self.elemento = ElementoProgramma(
             "25040-0",
             varianti={"M", "P", "S", "R", "T"},
@@ -116,7 +115,6 @@ class TestDestinazioni(unittest.TestCase):
             "TORNI_MODIFICHE": self.modifiche,
             "TORNI_ACC_SERIE": self.acc_serie,
             "TORNI_ACC_MODIFICHE": self.acc_modifiche,
-            "TORNI_ACC_RICAMBI": self.acc_ricambi,
         }
 
     def _piano(self, cosa, tipo, codice="25040", sorgenti=("SORGENE",), elementi=None):
@@ -135,7 +133,7 @@ class TestDestinazioni(unittest.TestCase):
         finally:
             os.path.isdir = original_isdir
 
-    def test_configura_esattamente_sei_cartelle_torni(self):
+    def test_configura_esattamente_cinque_cartelle_torni(self):
         self.assertEqual(
             CHIAVI_TORNI,
             (
@@ -144,7 +142,6 @@ class TestDestinazioni(unittest.TestCase):
                 "TORNI_MODIFICHE",
                 "TORNI_ACC_SERIE",
                 "TORNI_ACC_MODIFICHE",
-                "TORNI_ACC_RICAMBI",
             ),
         )
         self.assertEqual(
@@ -155,7 +152,6 @@ class TestDestinazioni(unittest.TestCase):
                 "TORNIO / MODIFICHE",
                 "TORNIO / ACC / SERIE",
                 "TORNIO / ACC / MODIFICHE",
-                "TORNIO / ACCESSORI / RICAMBI",
             },
         )
 
@@ -224,23 +220,23 @@ class TestDestinazioni(unittest.TestCase):
         ))
 
     def test_accessori_ricambio(self):
-        sorgente = os.path.join("RULLI", "ACC", "RICAMBI", "14074")
+        sorgente = os.path.join("RULLI", "RICAMBI", "25010")
         cartella_z = ElementoProgramma(
-            "Z31133",
+            "Z30100",
             varianti={"M", "P", "S"},
             file_min=[
-                (variante, os.path.join("SORGENE", "Z31133", f"{variante}31133.MIN"))
+                (variante, os.path.join("SORGENE", "Z30100", f"{variante}30100.MIN"))
                 for variante in "MPS"
             ],
             is_cartella=True,
         )
         piano = self._piano(
-            "ACCESSORI", "RICAMBIO", "14074", (sorgente,), [cartella_z]
+            "ACCESSORI", "RICAMBIO", "25010", (sorgente,), [cartella_z]
         )
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
             operazione.cartella_destinazione
-            == os.path.join(self.acc_ricambi, "Z31133", "14074")
+            == os.path.join(self.acc_modifiche, "Z30100", "25010")
             for operazione in piano
         ))
 

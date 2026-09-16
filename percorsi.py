@@ -93,10 +93,8 @@ def _chiavi_richieste(selezione: Selezione) -> tuple[str, ...]:
         return ("TORNI_MODIFICHE",)
     if caso == ("ACCESSORI", "SERIE"):
         return ("TORNI_ACC_SERIE",)
-    if caso == ("ACCESSORI", "MODIFICA"):
+    if caso in {("ACCESSORI", "MODIFICA"), ("ACCESSORI", "RICAMBIO")}:
         return ("TORNI_ACC_MODIFICHE",)
-    if caso == ("ACCESSORI", "RICAMBIO"):
-        return ("TORNI_ACC_RICAMBI",)
     raise ValueError(f"Combinazione non gestita: {selezione.cosa} / {selezione.tipo}")
 
 
@@ -126,7 +124,7 @@ def _destinazione(
         )
     if caso == ("ACCESSORI", "RICAMBIO"):
         return os.path.join(
-            percorsi["TORNI_ACC_RICAMBI"], cartella_z, serie
+            percorsi["TORNI_ACC_MODIFICHE"], cartella_z, serie
         )
     raise ValueError(f"Combinazione non gestita: {selezione.cosa} / {selezione.tipo}")
 

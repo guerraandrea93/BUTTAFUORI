@@ -37,7 +37,6 @@ CHIAVI_TORNI = (
     "TORNI_MODIFICHE",
     "TORNI_ACC_SERIE",
     "TORNI_ACC_MODIFICHE",
-    "TORNI_ACC_RICAMBI",
 )
 ETICHETTE_TORNI = {
     "TORNI_SGROSSATURA": "TORNIO / SGROSSATURA",
@@ -45,7 +44,6 @@ ETICHETTE_TORNI = {
     "TORNI_MODIFICHE": "TORNIO / MODIFICHE",
     "TORNI_ACC_SERIE": "TORNIO / ACC / SERIE",
     "TORNI_ACC_MODIFICHE": "TORNIO / ACC / MODIFICHE",
-    "TORNI_ACC_RICAMBI": "TORNIO / ACCESSORI / RICAMBI",
 }
 
 
@@ -80,7 +78,7 @@ def inizializza_percorsi() -> dict[str, str]:
         "RULLI_RICAMBIO": os.path.join(radice_rulli, "RICAMBI", "SERIE"),
         "ACCESSORI_SERIE": os.path.join(radice_rulli, "ACC"),
         "ACCESSORI_MODIFICA": os.path.join(radice_rulli, "ACC"),
-        "ACCESSORI_RICAMBIO": os.path.join(radice_rulli, "ACC", "RICAMBI"),
+        "ACCESSORI_RICAMBIO": os.path.join(radice_rulli, "ACC", "RICAMBI", "SERIE"),
     }
     percorsi = {
         f"{nome}_1": config.get("PERCORSI", nome, fallback=percorso)
@@ -116,11 +114,6 @@ def inizializza_percorsi() -> dict[str, str]:
             config,
             ("TORNI_ACC_MODIFICHE",),
             os.path.join(radice_torni, "ACC", "MODIFICHE"),
-        ),
-        "TORNI_ACC_RICAMBI": _primo_percorso(
-            config,
-            ("TORNI_ACC_RICAMBI",),
-            os.path.join(radice_torni, "ACCESSORI", "RICAMBI"),
         ),
     }
     percorsi.update(predefiniti_torni)
