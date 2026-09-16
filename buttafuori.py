@@ -1,19 +1,24 @@
 """GUI principale: selezione e verifica delle sorgenti RULLI."""
 import os
+import queue
+import threading
 import tkinter as tk
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
 try:
-    from .classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
+    from .classificazione import ElementoProgramma, leggi_contenuto_cartelle
     from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from .percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente
     from .warning import valuta
 except ImportError:
-    from classificazione import ElementoProgramma, leggi_cartelle, leggi_note_txt
+    from classificazione import ElementoProgramma, leggi_contenuto_cartelle
     from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from percorsi import Selezione, cartelle_sorgenti, descrizione_sorgente
     from warning import valuta
+
+
+DIMENSIONE_BLOCCO = 150
 
 
 def main() -> None:
@@ -26,6 +31,17 @@ def main() -> None:
     stato = tk.StringVar(value="Seleziona COSA e TIPO, poi inserisci un codice SERIE.")
     recenti_frame = ttk.Frame(root)
     cartella_corrente = [None]
+    caricamento_in_corso = [False]
+    risultati_caricamento: queue.Queue = queue.Queue()
+
+    def svuota_tabella():
+        righe = table.get_children()
+        if righe:
+            table.delete(*righe)
+
+    def svuota_note():
+        for widget in note_area.winfo_children():
+            widget.destroy()
 
     def apri_configurazione_percorsi(titolo, chiavi_percorsi):
         dialogo = tk.Toplevel(root)
@@ -83,10 +99,8 @@ def main() -> None:
             if sorgenti_modificate:
                 cartella_corrente[0] = None
                 aggiorna_btn.configure(state="disabled")
-                for item in table.get_children():
-                    table.delete(item)
-                for widget in note_area.winfo_children():
-                    widget.destroy()
+                svuota_tabella()
+                svuota_note()
                 stato.set("Percorso RULLI aggiornato. Verifica nuovamente la sorgente.")
             dialogo.destroy()
 
@@ -117,10 +131,14 @@ def main() -> None:
     controls = tk.Frame(root, bg=COLORE_AZZURRO)
     controls.pack(fill="x", padx=14, pady=14)
 
+    radio_buttons = []
+
     def radio_row(row, label, variable, values):
         tk.Label(controls, text=label, bg=COLORE_AZZURRO, fg=COLORE_TESTO, width=10, anchor="w", font=("Segoe UI", 10, "bold")).grid(row=row, column=0, padx=10, pady=5, sticky="w")
         for col, value in enumerate(values, 1):
-            ttk.Radiobutton(controls, text=value, value=value, variable=variable).grid(row=row, column=col, padx=8, pady=5, sticky="w")
+            radio = ttk.Radiobutton(controls, text=value, value=value, variable=variable)
+            radio.grid(row=row, column=col, padx=8, pady=5, sticky="w")
+            radio_buttons.append(radio)
 
     radio_row(0, "COSA", cosa, ("RULLI", "ACCESSORI"))
     radio_row(1, "TIPO", tipo, ("SERIE", "MODIFICA", "RICAMBIO"))
@@ -152,45 +170,105 @@ def main() -> None:
     table.pack(side="left", fill="both", expand=True)
     scroll.pack(side="right", fill="y")
 
-    def mostra_note_txt(cartelle):
-        for widget in note_area.winfo_children():
-            widget.destroy()
-        for nota in leggi_note_txt(cartelle):
+    def mostra_note_txt(note):
+        svuota_note()
+        for nota in note:
             riga = tk.Frame(note_area, bg="#FFF3B0", padx=8, pady=5)
             riga.pack(fill="x", pady=2)
             tk.Label(riga, text=nota.titolo, bg="#FFF3B0", fg="#5C4500", font=("Segoe UI", 10, "bold")).pack(side="left")
             tk.Label(riga, text=nota.prima_riga or "(prima riga vuota)", bg="#FFF3B0", fg="#5C4500", anchor="w").pack(side="left", fill="x", expand=True, padx=(12, 0))
 
-    def carica(cartelle: list[str], mantieni_selezione: bool = False) -> None:
-        selezionati = {table.item(item, "text") for item in table.selection()} if mantieni_selezione else set()
-        for item in table.get_children():
-            table.delete(item)
-        cartelle_esistenti = [cartella for cartella in cartelle if os.path.isdir(cartella)]
-        if not cartelle_esistenti:
-            mostra_note_txt(())
-            cartella_corrente[0] = None
+    def imposta_controlli_caricamento(attivo: bool):
+        stato_widget = "disabled" if attivo else "normal"
+        entry.configure(state=stato_widget)
+        verifica_btn.configure(state=stato_widget)
+        for radio in radio_buttons:
+            radio.configure(state=stato_widget)
+        latest_btn.configure(state="disabled" if attivo or not (cosa.get() and tipo.get()) else "normal")
+        if attivo:
             aggiorna_btn.configure(state="disabled")
-            stato.set("Sorgente non trovata: " + " | ".join(cartelle))
-            return
-        mostra_note_txt(cartelle_esistenti)
-        elementi: list[ElementoProgramma] = leggi_cartelle(cartelle_esistenti, tipo.get())
-        cartella_corrente[0] = cartelle
-        aggiorna_btn.configure(state="normal")
-        da_selezionare = []
-        for index, elemento in enumerate(elementi):
-            warning = valuta(elemento, tipo.get())
+        else:
+            aggiorna_btn.configure(state="normal" if cartella_corrente[0] is not None else "disabled")
+
+    def termina_caricamento(cartelle_esistenti, elementi, note, selezionati, tipo_corrente, indice=0, da_selezionare=None):
+        if da_selezionare is None:
+            mostra_note_txt(note)
+            da_selezionare = []
+
+        fine = min(indice + DIMENSIONE_BLOCCO, len(elementi))
+        for posizione in range(indice, fine):
+            elemento = elementi[posizione]
+            warning = valuta(elemento, tipo_corrente)
             flags = tuple("✓" if presente else "" for presente in (
                 elemento.presenza_prt, elemento.presenza_m, elemento.presenza_p,
                 elemento.presenza_s, elemento.presenza_r, elemento.presenza_t,
             ))
-            tag = "warning" if warning else ("pari" if index % 2 == 0 else "dispari")
-            item_id = table.insert("", "end", text=elemento.identificativo,
-                                   values=(*flags, "⚠ " + "; ".join(warning) if warning else ""), tags=(tag,))
+            tag = "warning" if warning else ("pari" if posizione % 2 == 0 else "dispari")
+            item_id = table.insert(
+                "", "end", text=elemento.identificativo,
+                values=(*flags, "⚠ " + "; ".join(warning) if warning else ""), tags=(tag,),
+            )
             if elemento.identificativo in selezionati:
                 da_selezionare.append(item_id)
+
+        if fine < len(elementi):
+            stato.set(f"Creazione tabella: {fine}/{len(elementi)} elementi")
+            root.after_idle(
+                termina_caricamento,
+                cartelle_esistenti, elementi, note, selezionati, tipo_corrente, fine, da_selezionare,
+            )
+            return
+
         if da_selezionare:
             table.selection_set(da_selezionare)
+        caricamento_in_corso[0] = False
+        aggiorna_btn.configure(state="normal")
+        imposta_controlli_caricamento(False)
         stato.set(f"{' | '.join(cartelle_esistenti)} - {len(elementi)} elementi")
+
+    def controlla_caricamenti():
+        try:
+            while True:
+                esito, cartelle, cartelle_esistenti, selezionati, tipo_corrente, risultato = risultati_caricamento.get_nowait()
+                if esito == "errore":
+                    caricamento_in_corso[0] = False
+                    imposta_controlli_caricamento(False)
+                    stato.set(f"Errore durante la lettura: {risultato}")
+                elif not cartelle_esistenti:
+                    caricamento_in_corso[0] = False
+                    cartella_corrente[0] = None
+                    mostra_note_txt(())
+                    imposta_controlli_caricamento(False)
+                    stato.set("Sorgente non trovata: " + " | ".join(cartelle))
+                else:
+                    cartella_corrente[0] = cartelle
+                    termina_caricamento(
+                        cartelle_esistenti, risultato.elementi, risultato.note, selezionati, tipo_corrente,
+                    )
+        except queue.Empty:
+            pass
+        root.after(50, controlla_caricamenti)
+
+    def carica(cartelle: list[str], mantieni_selezione: bool = False) -> None:
+        if caricamento_in_corso[0]:
+            return
+        caricamento_in_corso[0] = True
+        selezionati = {table.item(item, "text") for item in table.selection()} if mantieni_selezione else set()
+        tipo_corrente = tipo.get()
+        svuota_tabella()
+        svuota_note()
+        imposta_controlli_caricamento(True)
+        stato.set("Lettura cartelle in corso...")
+
+        def lavoro():
+            try:
+                cartelle_esistenti = [cartella for cartella in cartelle if os.path.isdir(cartella)]
+                risultato = leggi_contenuto_cartelle(cartelle_esistenti, tipo_corrente)
+                risultati_caricamento.put(("ok", cartelle, cartelle_esistenti, selezionati, tipo_corrente, risultato))
+            except Exception as exc:
+                risultati_caricamento.put(("errore", cartelle, [], selezionati, tipo_corrente, exc))
+
+        threading.Thread(target=lavoro, name="lettura-sorgenti", daemon=True).start()
 
     def verifica():
         recenti_frame.pack_forget()
@@ -241,7 +319,8 @@ def main() -> None:
         recenti_frame.pack(fill="x", padx=14, pady=(0, 8), before=body)
 
     def abilita_recenti(*_):
-        latest_btn.configure(state="normal" if cosa.get() and tipo.get() else "disabled")
+        if not caricamento_in_corso[0]:
+            latest_btn.configure(state="normal" if cosa.get() and tipo.get() else "disabled")
 
     cosa.trace_add("write", abilita_recenti)
     tipo.trace_add("write", abilita_recenti)
@@ -249,13 +328,15 @@ def main() -> None:
     aggiorna_btn.pack(side="right")
     latest_btn = ttk.Button(controls, text="ULTIME MODIFICATE", command=mostra_recenti, state="disabled")
     latest_btn.grid(row=2, column=3, padx=12, pady=5)
-    ttk.Button(controls, text="VERIFICA SORGENTE", command=verifica).grid(row=2, column=4, padx=8, pady=5)
+    verifica_btn = ttk.Button(controls, text="VERIFICA SORGENTE", command=verifica)
+    verifica_btn.grid(row=2, column=4, padx=8, pady=5)
     entry.bind("<Return>", lambda _: verifica())
     controls.columnconfigure(2, weight=0)
     footer = ttk.Frame(root)
     footer.pack(fill="x", padx=14, pady=(0, 12))
     ttk.Button(footer, text="SELEZIONA TUTTI", command=lambda: table.selection_set(table.get_children())).pack(side="left")
     ttk.Button(footer, text="AVANTI", command=lambda: messagebox.showinfo("Fase 2", "La verifica TORNI e la copia saranno implementate nella Fase 2.")).pack(side="right")
+    root.after(50, controlla_caricamenti)
     root.mainloop()
 
 

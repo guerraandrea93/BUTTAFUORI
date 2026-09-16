@@ -1,8 +1,10 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from classificazione import leggi_cartella, leggi_cartelle, leggi_note_txt
+from classificazione import leggi_cartella, leggi_cartelle, leggi_contenuto_cartelle, leggi_note_txt
 
 
 class TestFiltroRevisioni(unittest.TestCase):
@@ -47,6 +49,21 @@ class TestFiltroRevisioni(unittest.TestCase):
             note = leggi_note_txt((cartella,))
 
         self.assertEqual([(nota.titolo, nota.prima_riga) for nota in note], [("avviso.txt", "Prima riga")])
+
+    def test_programmi_e_note_usano_una_sola_scansione(self):
+        with tempfile.TemporaryDirectory() as cartella:
+            Path(cartella, "M14075C19-0.MIN").touch()
+            Path(cartella, "14075C19-0.PRT").touch()
+            Path(cartella, "avviso.txt").write_text("Controllare il rullo\n", encoding="utf-8")
+
+            with patch("classificazione.os.scandir", wraps=os.scandir) as scandir:
+                risultato = leggi_contenuto_cartelle((cartella,), "SERIE")
+
+        self.assertEqual(scandir.call_count, 1)
+        self.assertEqual(len(risultato.elementi), 1)
+        self.assertTrue(risultato.elementi[0].presenza_prt)
+        self.assertEqual(risultato.elementi[0].varianti, {"M"})
+        self.assertEqual(risultato.note[0].prima_riga, "Controllare il rullo")
 
 
 if __name__ == "__main__":
