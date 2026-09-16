@@ -9,12 +9,12 @@ from tkinter import filedialog, messagebox, ttk
 
 try:
     from .classificazione import ElementoProgramma, leggi_contenuto_cartelle
-    from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
+    from .funzioni import CHIAVI_SORGENTI, CHIAVI_SORGENTI_OBBLIGATORIE, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from .percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from .warning import valuta
 except ImportError:
     from classificazione import ElementoProgramma, leggi_contenuto_cartelle
-    from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
+    from funzioni import CHIAVI_SORGENTI, CHIAVI_SORGENTI_OBBLIGATORIE, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from warning import valuta
 
@@ -90,7 +90,7 @@ def main() -> None:
 
         def salva():
             nuovi = {nome: valori[nome].get().strip() for nome in chiavi_percorsi}
-            obbligatorie = set(CHIAVI_TORNI) | set(CHIAVI_SORGENTI)
+            obbligatorie = set(CHIAVI_TORNI) | set(CHIAVI_SORGENTI_OBBLIGATORIE)
             non_validi = [
                 nome for nome, percorso in nuovi.items()
                 if (not percorso and nome in obbligatorie)

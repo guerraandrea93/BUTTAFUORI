@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from classificazione import ElementoProgramma, leggi_cartella, leggi_cartelle, leggi_contenuto_cartelle, leggi_note_txt
-from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, salva_percorsi
+from funzioni import CHIAVI_SORGENTI, CHIAVI_SORGENTI_OBBLIGATORIE, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, salva_percorsi
 from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, pianifica_destinazioni
 
 
@@ -244,6 +244,7 @@ class TestDestinazioni(unittest.TestCase):
             ETICHETTE_SORGENTI["RULLI_RICAMBIO"],
             "SECONDARIA - RULLI / RICAMBI",
         )
+        self.assertEqual(CHIAVI_SORGENTI_OBBLIGATORIE, ("RULLI_UNIVERSALE",))
 
     def test_serie_legge_universale_e_secondaria(self):
         percorsi = {
