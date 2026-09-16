@@ -22,6 +22,10 @@ except ImportError:
 DIMENSIONE_BLOCCO = 150
 
 
+def etichetta_elemento(elemento: ElementoProgramma) -> str:
+    return f"📁 {elemento.identificativo}" if elemento.is_cartella else elemento.identificativo
+
+
 def main() -> None:
     root = tk.Tk()
     root.title("BUTTAFUORI - selezione sorgente")
@@ -403,7 +407,7 @@ def main() -> None:
         if da_selezionare is None:
             mostra_note_txt(note)
             elementi_correnti.update(
-                (elemento.identificativo, elemento) for elemento in elementi
+                (etichetta_elemento(elemento), elemento) for elemento in elementi
             )
             da_selezionare = []
 
@@ -416,17 +420,18 @@ def main() -> None:
                 elemento.presenza_s, elemento.presenza_r, elemento.presenza_t,
             ))
             tag = "warning" if warning else ("pari" if posizione % 2 == 0 else "dispari")
-            timestamp = date_modifica[elemento.identificativo]
+            etichetta = etichetta_elemento(elemento)
+            timestamp = date_modifica[etichetta]
             modifica = (
                 datetime.fromtimestamp(timestamp).strftime("%d/%m/%Y %H:%M")
                 if timestamp else "—"
             )
             item_id = table.insert(
-                "", "end", text=elemento.identificativo,
+                "", "end", text=etichetta,
                 values=(*flags, modifica, "⚠ " + "; ".join(warning) if warning else ""),
                 tags=(tag,),
             )
-            if elemento.identificativo in selezionati:
+            if etichetta in selezionati:
                 da_selezionare.append(item_id)
 
         if fine < len(elementi):
@@ -510,12 +515,12 @@ def main() -> None:
                             date.append(os.path.getmtime(percorso))
                         except OSError:
                             continue
-                    date_modifica[elemento.identificativo] = max(date, default=0.0)
+                    date_modifica[etichetta_elemento(elemento)] = max(date, default=0.0)
 
                 if ordinamento_corrente == "ULTIMA MODIFICA":
                     risultato.elementi.sort(
                         key=lambda elemento: (
-                            date_modifica[elemento.identificativo],
+                            date_modifica[etichetta_elemento(elemento)],
                             elemento.identificativo.casefold(),
                         ),
                         reverse=True,

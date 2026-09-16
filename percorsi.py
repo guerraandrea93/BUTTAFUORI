@@ -50,7 +50,7 @@ def _aggiungi_unica(cartelle: list[str], gia_aggiunte: set[str], cartella: str) 
 def cartelle_sorgenti(percorsi: dict[str, str], selezione: Selezione, codice: str) -> list[str]:
     codice = codice.strip()
     combinazione = f"{selezione.cosa}_{selezione.tipo}"
-    nome_cartella = _normalizza_z(codice) if selezione.tipo == "RICAMBIO" else codice
+    nome_cartella = codice
     cartelle = []
     gia_aggiunte = set()
     for indice in (1, 2):
@@ -72,10 +72,10 @@ def _normalizza_z(codice: str) -> str:
 
 
 def ricava_serie_ricambio(cartelle_sorgente) -> str:
-    """Ricava 25010 da percorsi come .../SERIE 25010/Z30100."""
+    """Ricava 25010 da percorsi come .../RICAMBI/SERIE 25010."""
     for cartella in cartelle_sorgente:
         parti = [parte for parte in re.split(r"[\\/]+", os.path.normpath(cartella)) if parte]
-        for parte in reversed(parti[:-1]):
+        for parte in reversed(parti):
             match = re.fullmatch(r"(?:SERIE[\s_-]*)?(\d{4,})", parte, re.IGNORECASE)
             if match:
                 return match.group(1)
@@ -140,10 +140,9 @@ def pianifica_destinazioni(
     """Genera una riga di copia per ogni file MIN ammesso dalle sei regole."""
     giorno = giorno or date.today()
     serie = codice.strip()
-    cartella_z = ""
+    cartella_z_predefinita = ""
     if selezione.tipo == "RICAMBIO":
         serie = ricava_serie_ricambio(cartelle_sorgente)
-        cartella_z = _normalizza_z(codice)
     if not serie:
         raise ValueError("Codice serie mancante.")
 
@@ -165,7 +164,20 @@ def pianifica_destinazioni(
     )
     operazioni = []
     for elemento in elementi:
-        for variante, sorgente in sorted(elemento.percorsi.items()):
+        cartella_z = cartella_z_predefinita
+        if selezione.tipo == "RICAMBIO":
+            if not elemento.is_cartella or not elemento.identificativo.upper().startswith("Z"):
+                raise ValueError(
+                    "Per i ricambi seleziona una cartella il cui nome inizia con Z."
+                )
+            cartella_z = _normalizza_z(elemento.identificativo)
+
+        file_min = elemento.file_min or [
+            (variante, sorgente)
+            for variante, sorgente in elemento.percorsi.items()
+            if variante in {"M", "P", "S", "R", "T"}
+        ]
+        for variante, sorgente in sorted(file_min):
             if variante not in consentite:
                 continue
             operazioni.append(

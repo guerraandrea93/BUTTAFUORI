@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from classificazione import ElementoProgramma, leggi_cartella, leggi_cartelle, leggi_contenuto_cartelle, leggi_note_txt
 from funzioni import CHIAVI_TORNI, ETICHETTE_TORNI
-from percorsi import Selezione, applica_destinazione_temporanea, pianifica_destinazioni, ricava_serie_ricambio
+from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, pianifica_destinazioni, ricava_serie_ricambio
 
 
 class TestFiltroRevisioni(unittest.TestCase):
@@ -70,6 +70,26 @@ class TestFiltroRevisioni(unittest.TestCase):
         self.assertEqual(risultato.elementi[0].varianti, {"M"})
         self.assertEqual(risultato.note[0].prima_riga, "Controllare il rullo")
 
+    def test_mostra_cartella_e_legge_i_suoi_file_immediati(self):
+        with tempfile.TemporaryDirectory() as cartella:
+            cartella_z = Path(cartella, "Z30100")
+            cartella_z.mkdir()
+            Path(cartella_z, "M30100-0.MIN").touch()
+            Path(cartella_z, "P30100-0.MIN").touch()
+            Path(cartella_z, "30100-0.PRT").touch()
+            Path(cartella_z, "nota.txt").write_text("Nota ricambio\n", encoding="utf-8")
+
+            risultato = leggi_contenuto_cartelle((cartella,), "RICAMBIO")
+
+        self.assertEqual(len(risultato.elementi), 1)
+        elemento = risultato.elementi[0]
+        self.assertEqual(elemento.identificativo, "Z30100")
+        self.assertTrue(elemento.is_cartella)
+        self.assertTrue(elemento.presenza_prt)
+        self.assertEqual(elemento.varianti, {"M", "P"})
+        self.assertEqual(len(elemento.file_min), 2)
+        self.assertEqual(risultato.note[0].titolo, "Z30100 / nota.txt")
+
 
 class TestDestinazioni(unittest.TestCase):
     def setUp(self):
@@ -97,7 +117,7 @@ class TestDestinazioni(unittest.TestCase):
             "TORNI_ACC_MODIFICHE": self.acc_modifiche,
         }
 
-    def _piano(self, cosa, tipo, codice="25040", sorgenti=("SORGENE",)):
+    def _piano(self, cosa, tipo, codice="25040", sorgenti=("SORGENE",), elementi=None):
         percorsi = self._percorsi()
         original_isdir = os.path.isdir
         try:
@@ -106,7 +126,7 @@ class TestDestinazioni(unittest.TestCase):
                 percorsi,
                 Selezione(cosa, tipo),
                 codice,
-                [self.elemento],
+                elementi or [self.elemento],
                 sorgenti,
                 self.giorno,
             )
@@ -160,9 +180,20 @@ class TestDestinazioni(unittest.TestCase):
         ))
 
     def test_rulli_ricambio_ricava_serie_dalla_sorgente(self):
-        sorgente = os.path.join("RULLI", "RICAMBI", "SERIE 25010", "Z30100")
+        sorgente = os.path.join("RULLI", "RICAMBI", "SERIE 25010")
         self.assertEqual(ricava_serie_ricambio((sorgente,)), "25010")
-        piano = self._piano("RULLI", "RICAMBIO", "30100", (sorgente,))
+        cartella_z = ElementoProgramma(
+            "Z30100",
+            varianti={"M", "P", "S"},
+            file_min=[
+                (variante, os.path.join("SORGENE", "Z30100", f"{variante}30100.MIN"))
+                for variante in "MPS"
+            ],
+            is_cartella=True,
+        )
+        piano = self._piano(
+            "RULLI", "RICAMBIO", "SERIE 25010", (sorgente,), [cartella_z]
+        )
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
             operazione.cartella_destinazione
@@ -189,14 +220,35 @@ class TestDestinazioni(unittest.TestCase):
         ))
 
     def test_accessori_ricambio(self):
-        sorgente = os.path.join("RULLI", "RICAMBI", "25010", "Z30100")
-        piano = self._piano("ACCESSORI", "RICAMBIO", "Z30100", (sorgente,))
+        sorgente = os.path.join("RULLI", "RICAMBI", "25010")
+        cartella_z = ElementoProgramma(
+            "Z30100",
+            varianti={"M", "P", "S"},
+            file_min=[
+                (variante, os.path.join("SORGENE", "Z30100", f"{variante}30100.MIN"))
+                for variante in "MPS"
+            ],
+            is_cartella=True,
+        )
+        piano = self._piano(
+            "ACCESSORI", "RICAMBIO", "25010", (sorgente,), [cartella_z]
+        )
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
             operazione.cartella_destinazione
             == os.path.join(self.acc_modifiche, "Z30100", "25010")
             for operazione in piano
         ))
+
+    def test_ricambio_apre_la_cartella_scritta_non_la_z(self):
+        percorsi = {"RULLI_RICAMBIO_1": os.path.join("RULLI", "RICAMBI")}
+        cartelle = cartelle_sorgenti(
+            percorsi, Selezione("RULLI", "RICAMBIO"), "SERIE 25010"
+        )
+        self.assertEqual(
+            cartelle,
+            [os.path.join("RULLI", "RICAMBI", "SERIE 25010")],
+        )
 
     def test_destinazione_temporanea_si_applica_al_piano_selezionato(self):
         piano = self._piano("RULLI", "MODIFICA")

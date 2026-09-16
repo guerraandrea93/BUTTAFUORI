@@ -13,6 +13,8 @@ class ElementoProgramma:
     presenza_prt: bool = False
     varianti: set[str] = field(default_factory=set)
     percorsi: dict[str, str] = field(default_factory=dict)
+    file_min: list[tuple[str, str]] = field(default_factory=list)
+    is_cartella: bool = False
     warning_codes: list[str] = field(default_factory=list)
 
     @property
@@ -57,10 +59,73 @@ def _filtra_elementi(elementi: dict[str, ElementoProgramma], tipo: str) -> list[
         revisione_attesa = lambda revisione: revisione == 0 if tipo == "SERIE" else revisione > 0
         risultati = (
             elemento for elemento in risultati
-            if (match := _REVISIONE_FINALE_RE.search(elemento.identificativo))
-            and revisione_attesa(int(match.group(1)))
+            if elemento.is_cartella
+            or (
+                (match := _REVISIONE_FINALE_RE.search(elemento.identificativo))
+                and revisione_attesa(int(match.group(1)))
+            )
         )
     return sorted(risultati, key=lambda elemento: elemento.identificativo.casefold())
+
+
+def _aggiungi_min(elemento: ElementoProgramma, variante: str | None, percorso: str) -> None:
+    if not variante:
+        return
+    elemento.varianti.add(variante)
+    elemento.file_min.append((variante, percorso))
+    chiave = variante
+    if chiave in elemento.percorsi:
+        chiave = f"{variante}:{len(elemento.file_min)}"
+    elemento.percorsi[chiave] = percorso
+
+
+def _leggi_txt(percorso: str, titolo: str) -> NotaTxt:
+    try:
+        with open(percorso, "r", encoding="utf-8-sig", errors="replace") as file_txt:
+            prima_riga = file_txt.readline().rstrip("\r\n")
+    except OSError:
+        prima_riga = "[Impossibile leggere il file]"
+    return NotaTxt(titolo, prima_riga, percorso)
+
+
+def _leggi_sottocartella(voce, elementi, note, includi_note: bool) -> None:
+    """Raccoglie i file immediati di una cartella come un unico elemento selezionabile."""
+    elemento = ElementoProgramma(
+        identificativo=voce.name,
+        is_cartella=True,
+    )
+    try:
+        contenuto = os.scandir(voce.path)
+    except OSError:
+        elementi[f"cartella:{voce.name.casefold()}"] = elemento
+        return
+
+    with contenuto:
+        for file_voce in contenuto:
+            estensione = os.path.splitext(file_voce.name)[1].casefold()
+            if estensione not in {".min", ".prt", ".txt"}:
+                continue
+            try:
+                if not file_voce.is_file():
+                    continue
+            except OSError:
+                continue
+
+            stem = os.path.splitext(file_voce.name)[0]
+            if estensione == ".min":
+                _, variante = _chiave(stem)
+                _aggiungi_min(elemento, variante, file_voce.path)
+            elif estensione == ".prt":
+                elemento.presenza_prt = True
+                chiave = f"PRT:{file_voce.name.casefold()}"
+                elemento.percorsi[chiave] = file_voce.path
+            elif includi_note:
+                note.append(_leggi_txt(
+                    file_voce.path,
+                    f"{voce.name} / {file_voce.name}",
+                ))
+
+    elementi[f"cartella:{voce.name.casefold()}"] = elemento
 
 
 def _leggi_contenuto(cartelle, tipo: str, includi_programmi: bool, includi_note: bool) -> RisultatoLettura:
@@ -78,6 +143,13 @@ def _leggi_contenuto(cartelle, tipo: str, includi_programmi: bool, includi_note:
             continue
         with voci:
             for voce in voci:
+                try:
+                    if voce.is_dir():
+                        if includi_programmi:
+                            _leggi_sottocartella(voce, elementi, note, includi_note)
+                        continue
+                except OSError:
+                    continue
                 estensione = os.path.splitext(voce.name)[1].casefold()
                 if estensione not in estensioni_ammesse:
                     continue
@@ -93,9 +165,7 @@ def _leggi_contenuto(cartelle, tipo: str, includi_programmi: bool, includi_note:
                     if not base:
                         continue
                     elemento = elementi.setdefault(base.casefold(), ElementoProgramma(base))
-                    if variante:
-                        elemento.varianti.add(variante)
-                        elemento.percorsi.setdefault(variante, voce.path)
+                    _aggiungi_min(elemento, variante, voce.path)
                 elif includi_programmi and estensione == ".prt":
                     base, _ = _chiave(stem)
                     if not base:
@@ -104,12 +174,7 @@ def _leggi_contenuto(cartelle, tipo: str, includi_programmi: bool, includi_note:
                     elemento.presenza_prt = True
                     elemento.percorsi.setdefault("PRT", voce.path)
                 elif includi_note and estensione == ".txt":
-                    try:
-                        with open(voce.path, "r", encoding="utf-8-sig", errors="replace") as file_txt:
-                            prima_riga = file_txt.readline().rstrip("\r\n")
-                    except OSError:
-                        prima_riga = "[Impossibile leggere il file]"
-                    note.append(NotaTxt(voce.name, prima_riga, voce.path))
+                    note.append(_leggi_txt(voce.path, voce.name))
 
     return RisultatoLettura(
         elementi=_filtra_elementi(elementi, tipo) if includi_programmi else [],
