@@ -47,10 +47,17 @@ def _aggiungi_unica(cartelle: list[str], gia_aggiunte: set[str], cartella: str) 
         gia_aggiunte.add(chiave)
 
 
-def cartelle_sorgenti(percorsi: dict[str, str], selezione: Selezione, codice: str) -> list[str]:
+def cartelle_sorgenti(
+    percorsi: dict[str, str],
+    selezione: Selezione,
+    codice: str,
+    cartella_z: str = "",
+) -> list[str]:
     codice = codice.strip()
     combinazione = f"{selezione.cosa}_{selezione.tipo}"
     nome_cartella = codice
+    if selezione.tipo == "RICAMBIO" and cartella_z.strip():
+        nome_cartella = os.path.join(codice, _normalizza_z(cartella_z))
     cartelle = []
     gia_aggiunte = set()
     for indice in (1, 2):
@@ -82,6 +89,17 @@ def ricava_serie_ricambio(cartelle_sorgente) -> str:
     raise ValueError(
         "Impossibile ricavare la serie del ricambio dal percorso sorgente. "
         "È attesa una cartella come '25010' oppure 'SERIE 25010' sopra la cartella Z."
+    )
+
+
+def ricava_z_ricambio(cartelle_sorgente) -> str:
+    """Ricava Z31133 dal percorso sorgente .../14074/Z31133."""
+    for cartella in cartelle_sorgente:
+        nome = os.path.basename(os.path.normpath(cartella)).strip()
+        if re.fullmatch(r"Z.+", nome, re.IGNORECASE):
+            return _normalizza_z(nome)
+    raise ValueError(
+        "Impossibile ricavare la cartella Z dal percorso sorgente."
     )
 
 
@@ -140,9 +158,10 @@ def pianifica_destinazioni(
     """Genera una riga di copia per ogni file MIN ammesso dalle sei regole."""
     giorno = giorno or date.today()
     serie = codice.strip()
-    cartella_z_predefinita = ""
+    cartella_z = ""
     if selezione.tipo == "RICAMBIO":
         serie = ricava_serie_ricambio(cartelle_sorgente)
+        cartella_z = ricava_z_ricambio(cartelle_sorgente)
     if not serie:
         raise ValueError("Codice serie mancante.")
 
@@ -164,14 +183,6 @@ def pianifica_destinazioni(
     )
     operazioni = []
     for elemento in elementi:
-        cartella_z = cartella_z_predefinita
-        if selezione.tipo == "RICAMBIO":
-            if not elemento.is_cartella or not elemento.identificativo.upper().startswith("Z"):
-                raise ValueError(
-                    "Per i ricambi seleziona una cartella il cui nome inizia con Z."
-                )
-            cartella_z = _normalizza_z(elemento.identificativo)
-
         file_min = elemento.file_min or [
             (variante, sorgente)
             for variante, sorgente in elemento.percorsi.items()

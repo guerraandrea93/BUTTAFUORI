@@ -32,7 +32,9 @@ def main() -> None:
     root.geometry("1050x650")
     root.minsize(820, 520)
     percorsi = inizializza_percorsi()
-    cosa, tipo, codice = tk.StringVar(), tk.StringVar(), tk.StringVar()
+    cosa, tipo, codice, codice_z = (
+        tk.StringVar(), tk.StringVar(), tk.StringVar(), tk.StringVar()
+    )
     ordinamento = tk.StringVar(value="ALFABETICO")
     stato = tk.StringVar(value="Seleziona COSA e TIPO, poi inserisci un codice SERIE.")
     recenti_frame = ttk.Frame(root)
@@ -163,17 +165,23 @@ def main() -> None:
     entry = ttk.Entry(controls, textvariable=codice, width=28)
     entry.grid(row=2, column=1, columnspan=2, padx=12, pady=5, sticky="ew")
     tk.Label(
-        controls, text="ORDINA", bg=COLORE_AZZURRO, fg=COLORE_TESTO,
+        controls, text="Z RICAMBIO", bg=COLORE_AZZURRO, fg=COLORE_TESTO,
         width=10, anchor="w", font=("Segoe UI", 10, "bold"),
     ).grid(row=3, column=0, padx=10, pady=5, sticky="w")
+    entry_z = ttk.Entry(controls, textvariable=codice_z, width=28, state="disabled")
+    entry_z.grid(row=3, column=1, columnspan=2, padx=12, pady=5, sticky="ew")
+    tk.Label(
+        controls, text="ORDINA", bg=COLORE_AZZURRO, fg=COLORE_TESTO,
+        width=10, anchor="w", font=("Segoe UI", 10, "bold"),
+    ).grid(row=4, column=0, padx=10, pady=5, sticky="w")
     ordina_alfabetico = ttk.Radiobutton(
         controls, text="ALFABETICO", value="ALFABETICO", variable=ordinamento,
     )
-    ordina_alfabetico.grid(row=3, column=1, padx=8, pady=5, sticky="w")
+    ordina_alfabetico.grid(row=4, column=1, padx=8, pady=5, sticky="w")
     ordina_modifica = ttk.Radiobutton(
         controls, text="ULTIMA MODIFICA", value="ULTIMA MODIFICA", variable=ordinamento,
     )
-    ordina_modifica.grid(row=3, column=2, padx=8, pady=5, sticky="w")
+    ordina_modifica.grid(row=4, column=2, padx=8, pady=5, sticky="w")
     radio_buttons.extend((ordina_alfabetico, ordina_modifica))
 
     body = ttk.Panedwindow(root, orient="horizontal")
@@ -384,6 +392,9 @@ def main() -> None:
     def imposta_controlli_caricamento(attivo: bool):
         stato_widget = "disabled" if attivo else "normal"
         entry.configure(state=stato_widget)
+        entry_z.configure(
+            state="normal" if not attivo and tipo.get() == "RICAMBIO" else "disabled"
+        )
         verifica_btn.configure(state=stato_widget)
         for radio in radio_buttons:
             radio.configure(state=stato_widget)
@@ -543,10 +554,19 @@ def main() -> None:
     def verifica():
         recenti_frame.pack_forget()
         value = codice.get().strip()
+        z_value = codice_z.get().strip()
         if not value or not cosa.get() or not tipo.get():
             stato.set("Completa COSA, TIPO e SERIE.")
             return
-        carica(cartelle_sorgenti(percorsi, Selezione(cosa.get(), tipo.get()), value))
+        if tipo.get() == "RICAMBIO" and not z_value:
+            stato.set("Per i RICAMBI inserisci anche la cartella Z.")
+            return
+        carica(cartelle_sorgenti(
+            percorsi,
+            Selezione(cosa.get(), tipo.get()),
+            value,
+            z_value,
+        ))
 
     def aggiorna():
         if cartella_corrente[0] is not None:
@@ -591,6 +611,7 @@ def main() -> None:
     def abilita_recenti(*_):
         if not caricamento_in_corso[0]:
             latest_btn.configure(state="normal" if cosa.get() and tipo.get() else "disabled")
+            entry_z.configure(state="normal" if tipo.get() == "RICAMBIO" else "disabled")
 
     cosa.trace_add("write", abilita_recenti)
     tipo.trace_add("write", abilita_recenti)
@@ -603,6 +624,7 @@ def main() -> None:
     verifica_btn = ttk.Button(controls, text="VERIFICA SORGENTE", command=verifica)
     verifica_btn.grid(row=2, column=4, padx=8, pady=5)
     entry.bind("<Return>", lambda _: verifica())
+    entry_z.bind("<Return>", lambda _: verifica())
     controls.columnconfigure(2, weight=0)
     footer = ttk.Frame(root)
     footer.pack(fill="x", padx=14, pady=(0, 12))
