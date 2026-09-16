@@ -53,19 +53,30 @@ def cartelle_sorgenti(
     codice: str,
     cartella_z: str = "",
 ) -> list[str]:
+    """Restituisce la cartella universale e la secondaria della modalità.
+
+    La directory universale contiene sempre una sottocartella per serie. Per i
+    ricambi solo la directory secondaria aggiunge anche il livello Z.
+    """
     codice = codice.strip()
     combinazione = f"{selezione.cosa}_{selezione.tipo}"
-    nome_cartella = codice
-    if selezione.tipo == "RICAMBIO" and cartella_z.strip():
-        nome_cartella = os.path.join(codice, _normalizza_z(cartella_z))
     cartelle = []
     gia_aggiunte = set()
-    for indice in (1, 2):
-        radice = percorsi.get(f"{combinazione}_{indice}", "").strip()
-        if radice:
-            _aggiungi_unica(
-                cartelle, gia_aggiunte, os.path.join(radice, nome_cartella)
+
+    universale = percorsi.get("RULLI_UNIVERSALE", "").strip()
+    if universale:
+        _aggiungi_unica(
+            cartelle, gia_aggiunte, os.path.join(universale, codice)
+        )
+
+    secondaria = percorsi.get(combinazione, "").strip()
+    if secondaria:
+        percorso_secondario = os.path.join(secondaria, codice)
+        if selezione.tipo == "RICAMBIO" and cartella_z.strip():
+            percorso_secondario = os.path.join(
+                percorso_secondario, _normalizza_z(cartella_z)
             )
+        _aggiungi_unica(cartelle, gia_aggiunte, percorso_secondario)
     return cartelle
 
 
@@ -154,14 +165,15 @@ def pianifica_destinazioni(
     elementi,
     cartelle_sorgente,
     giorno: date | None = None,
+    cartella_z: str = "",
 ) -> list[OperazioneCopia]:
     """Genera una riga di copia per ogni file MIN ammesso dalle sei regole."""
     giorno = giorno or date.today()
     serie = codice.strip()
-    cartella_z = ""
     if selezione.tipo == "RICAMBIO":
-        serie = ricava_serie_ricambio(cartelle_sorgente)
-        cartella_z = ricava_z_ricambio(cartelle_sorgente)
+        if not cartella_z.strip():
+            raise ValueError("Cartella Z del ricambio mancante.")
+        cartella_z = _normalizza_z(cartella_z)
     if not serie:
         raise ValueError("Codice serie mancante.")
 

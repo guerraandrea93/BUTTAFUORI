@@ -9,12 +9,12 @@ from tkinter import filedialog, messagebox, ttk
 
 try:
     from .classificazione import ElementoProgramma, leggi_contenuto_cartelle
-    from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
+    from .funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from .percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from .warning import valuta
 except ImportError:
     from classificazione import ElementoProgramma, leggi_contenuto_cartelle
-    from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
+    from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, COLORE_AZZURRO, COLORE_NAVY, COLORE_RIGA_ALTERNATA, COLORE_TESTO, inizializza_percorsi, salva_percorsi
     from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, descrizione_sorgente, pianifica_destinazioni
     from warning import valuta
 
@@ -62,10 +62,13 @@ def main() -> None:
         dialogo.grab_set()
         dialogo.resizable(True, False)
         etichette = {
-            nome: ETICHETTE_TORNI.get(
+            nome: ETICHETTE_SORGENTI.get(
                 nome,
-                nome.rsplit("_", 1)[0].replace("_", " - ")
-                + " " + nome.rsplit("_", 1)[1],
+                ETICHETTE_TORNI.get(
+                    nome,
+                    nome.rsplit("_", 1)[0].replace("_", " - ")
+                    + " " + nome.rsplit("_", 1)[1],
+                ),
             )
             for nome in chiavi_percorsi
         }
@@ -87,9 +90,7 @@ def main() -> None:
 
         def salva():
             nuovi = {nome: valori[nome].get().strip() for nome in chiavi_percorsi}
-            obbligatorie = set(CHIAVI_TORNI) | {
-                nome for nome in CHIAVI_SORGENTI if nome.endswith("_1")
-            }
+            obbligatorie = set(CHIAVI_TORNI) | set(CHIAVI_SORGENTI)
             non_validi = [
                 nome for nome, percorso in nuovi.items()
                 if (not percorso and nome in obbligatorie)
@@ -278,6 +279,7 @@ def main() -> None:
                 codice.get(),
                 selezionati,
                 cartella_corrente[0],
+                cartella_z=codice_z.get(),
             )
         except ValueError as exc:
             tabella_destinazioni.insert("", "end", values=("ERRORE", str(exc), "BLOCCATO"))

@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from datetime import date
@@ -6,8 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from classificazione import ElementoProgramma, leggi_cartella, leggi_cartelle, leggi_contenuto_cartelle, leggi_note_txt
-from funzioni import CHIAVI_TORNI, ETICHETTE_TORNI
-from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, pianifica_destinazioni, ricava_serie_ricambio, ricava_z_ricambio
+from funzioni import CHIAVI_SORGENTI, CHIAVI_TORNI, ETICHETTE_SORGENTI, ETICHETTE_TORNI, salva_percorsi
+from percorsi import Selezione, applica_destinazione_temporanea, cartelle_sorgenti, pianifica_destinazioni
 
 
 class TestFiltroRevisioni(unittest.TestCase):
@@ -117,7 +118,10 @@ class TestDestinazioni(unittest.TestCase):
             "TORNI_ACC_MODIFICHE": self.acc_modifiche,
         }
 
-    def _piano(self, cosa, tipo, codice="25040", sorgenti=("SORGENE",), elementi=None):
+    def _piano(
+        self, cosa, tipo, codice="25040", sorgenti=("SORGENE",),
+        elementi=None, cartella_z="",
+    ):
         percorsi = self._percorsi()
         original_isdir = os.path.isdir
         try:
@@ -129,6 +133,7 @@ class TestDestinazioni(unittest.TestCase):
                 elementi or [self.elemento],
                 sorgenti,
                 self.giorno,
+                cartella_z,
             )
         finally:
             os.path.isdir = original_isdir
@@ -179,12 +184,10 @@ class TestDestinazioni(unittest.TestCase):
             for operazione in piano
         ))
 
-    def test_rulli_ricambio_ricava_serie_dalla_sorgente(self):
-        sorgente = os.path.join("RULLI", "RICAMBI", "SERIE 25010", "Z30100")
-        self.assertEqual(ricava_serie_ricambio((sorgente,)), "25010")
-        self.assertEqual(ricava_z_ricambio((sorgente,)), "Z30100")
+    def test_rulli_ricambio_usa_serie_e_z_inserite(self):
+        sorgente = os.path.join("RULLI", "RICAMBI", "25010", "Z30100")
         piano = self._piano(
-            "RULLI", "RICAMBIO", "SERIE 25010", (sorgente,)
+            "RULLI", "RICAMBIO", "25010", (sorgente,), cartella_z="30100"
         )
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
@@ -214,7 +217,7 @@ class TestDestinazioni(unittest.TestCase):
     def test_accessori_ricambio(self):
         sorgente = os.path.join("RULLI", "ACC", "RICAMBI", "14074", "Z31133")
         piano = self._piano(
-            "ACCESSORI", "RICAMBIO", "14074", (sorgente,)
+            "ACCESSORI", "RICAMBIO", "14074", (sorgente,), cartella_z="Z31133"
         )
         self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
         self.assertTrue(all(
@@ -223,15 +226,71 @@ class TestDestinazioni(unittest.TestCase):
             for operazione in piano
         ))
 
-    def test_ricambio_apre_serie_e_z_inserite(self):
-        percorsi = {"RULLI_RICAMBIO_1": os.path.join("RULLI", "RICAMBI")}
+    def test_configura_universale_e_sei_directory_secondarie(self):
+        self.assertEqual(
+            CHIAVI_SORGENTI,
+            (
+                "RULLI_UNIVERSALE",
+                "RULLI_SERIE",
+                "RULLI_MODIFICA",
+                "RULLI_RICAMBIO",
+                "ACCESSORI_SERIE",
+                "ACCESSORI_MODIFICA",
+                "ACCESSORI_RICAMBIO",
+            ),
+        )
+        self.assertEqual(ETICHETTE_SORGENTI["RULLI_UNIVERSALE"], "DIRECTORY UNIVERSALE")
+        self.assertEqual(
+            ETICHETTE_SORGENTI["RULLI_RICAMBIO"],
+            "SECONDARIA - RULLI / RICAMBI",
+        )
+
+    def test_serie_legge_universale_e_secondaria(self):
+        percorsi = {
+            "RULLI_UNIVERSALE": "UNIVERSALE",
+            "ACCESSORI_SERIE": os.path.join("RULLI", "ACC"),
+        }
         cartelle = cartelle_sorgenti(
-            percorsi, Selezione("RULLI", "RICAMBIO"), "SERIE 25010", "30100"
+            percorsi, Selezione("ACCESSORI", "SERIE"), "17074"
         )
         self.assertEqual(
             cartelle,
-            [os.path.join("RULLI", "RICAMBI", "SERIE 25010", "Z30100")],
+            [
+                os.path.join("UNIVERSALE", "17074"),
+                os.path.join("RULLI", "ACC", "17074"),
+            ],
         )
+
+    def test_ricambio_cerca_z_solo_nella_secondaria(self):
+        percorsi = {
+            "RULLI_UNIVERSALE": "UNIVERSALE",
+            "RULLI_RICAMBIO": os.path.join("RULLI", "RICAMBI"),
+        }
+        cartelle = cartelle_sorgenti(
+            percorsi, Selezione("RULLI", "RICAMBIO"), "25010", "30100"
+        )
+        self.assertEqual(
+            cartelle,
+            [
+                os.path.join("UNIVERSALE", "25010"),
+                os.path.join("RULLI", "RICAMBI", "25010", "Z30100"),
+            ],
+        )
+
+    def test_salva_i_percorsi_nel_json_divisi_in_due_sezioni(self):
+        percorsi = {
+            **{nome: f"sorgente/{nome}" for nome in CHIAVI_SORGENTI},
+            **{nome: f"destinazione/{nome}" for nome in CHIAVI_TORNI},
+        }
+        with tempfile.TemporaryDirectory() as cartella:
+            percorso_config = os.path.join(cartella, "percorsi.json")
+            with patch("funzioni.PERCORSO_CONFIG", percorso_config):
+                salva_percorsi(percorsi)
+            with open(percorso_config, encoding="utf-8") as config_file:
+                salvati = json.load(config_file)
+
+        self.assertEqual(set(salvati["PERCORSI_RULLI"]), set(CHIAVI_SORGENTI))
+        self.assertEqual(set(salvati["PERCORSI_TORNI"]), set(CHIAVI_TORNI))
 
     def test_destinazione_temporanea_si_applica_al_piano_selezionato(self):
         piano = self._piano("RULLI", "MODIFICA")
