@@ -1,10 +1,13 @@
 import os
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from classificazione import leggi_cartella, leggi_cartelle, leggi_contenuto_cartelle, leggi_note_txt
+from classificazione import ElementoProgramma, leggi_cartella, leggi_cartelle, leggi_contenuto_cartelle, leggi_note_txt
+from funzioni import CHIAVI_TORNI, ETICHETTE_TORNI
+from percorsi import Selezione, applica_destinazione_temporanea, pianifica_destinazioni, ricava_serie_ricambio
 
 
 class TestFiltroRevisioni(unittest.TestCase):
@@ -54,7 +57,9 @@ class TestFiltroRevisioni(unittest.TestCase):
         with tempfile.TemporaryDirectory() as cartella:
             Path(cartella, "M14075C19-0.MIN").touch()
             Path(cartella, "14075C19-0.PRT").touch()
-            Path(cartella, "avviso.txt").write_text("Controllare il rullo\n", encoding="utf-8")
+            Path(cartella, "avviso.txt").write_text(
+                "Controllare il rullo\n", encoding="utf-8"
+            )
 
             with patch("classificazione.os.scandir", wraps=os.scandir) as scandir:
                 risultato = leggi_contenuto_cartelle((cartella,), "SERIE")
@@ -64,6 +69,152 @@ class TestFiltroRevisioni(unittest.TestCase):
         self.assertTrue(risultato.elementi[0].presenza_prt)
         self.assertEqual(risultato.elementi[0].varianti, {"M"})
         self.assertEqual(risultato.note[0].prima_riga, "Controllare il rullo")
+
+
+class TestDestinazioni(unittest.TestCase):
+    def setUp(self):
+        self.sgrossatura = os.path.join("TORNIO", "SGROSSATURA")
+        self.finitura = os.path.join("TORNIO", "FINITURA")
+        self.modifiche = os.path.join("TORNIO", "MODIFICHE")
+        self.acc_serie = os.path.join("TORNIO", "ACC", "SERIE")
+        self.acc_modifiche = os.path.join("TORNIO", "ACC", "MODIFICHE")
+        self.elemento = ElementoProgramma(
+            "25040-0",
+            varianti={"M", "P", "S", "R", "T"},
+            percorsi={
+                variante: os.path.join("SORGENE", f"{variante}25040-0.MIN")
+                for variante in "MPSRT"
+            },
+        )
+        self.giorno = date(2026, 9, 15)
+
+    def _percorsi(self):
+        return {
+            "TORNI_SGROSSATURA": self.sgrossatura,
+            "TORNI_FINITURA": self.finitura,
+            "TORNI_MODIFICHE": self.modifiche,
+            "TORNI_ACC_SERIE": self.acc_serie,
+            "TORNI_ACC_MODIFICHE": self.acc_modifiche,
+        }
+
+    def _piano(self, cosa, tipo, codice="25040", sorgenti=("SORGENE",)):
+        percorsi = self._percorsi()
+        original_isdir = os.path.isdir
+        try:
+            os.path.isdir = lambda percorso: percorso in percorsi.values()
+            return pianifica_destinazioni(
+                percorsi,
+                Selezione(cosa, tipo),
+                codice,
+                [self.elemento],
+                sorgenti,
+                self.giorno,
+            )
+        finally:
+            os.path.isdir = original_isdir
+
+    def test_configura_esattamente_cinque_cartelle_torni(self):
+        self.assertEqual(
+            CHIAVI_TORNI,
+            (
+                "TORNI_SGROSSATURA",
+                "TORNI_FINITURA",
+                "TORNI_MODIFICHE",
+                "TORNI_ACC_SERIE",
+                "TORNI_ACC_MODIFICHE",
+            ),
+        )
+        self.assertEqual(
+            set(ETICHETTE_TORNI.values()),
+            {
+                "TORNIO / SGROSSATURA",
+                "TORNIO / FINITURA",
+                "TORNIO / MODIFICHE",
+                "TORNIO / ACC / SERIE",
+                "TORNIO / ACC / MODIFICHE",
+            },
+        )
+
+    def test_rulli_serie_divide_sgrossatura_e_finitura(self):
+        piano = self._piano("RULLI", "SERIE")
+        destinazioni = {
+            operazione.variante: operazione.cartella_destinazione
+            for operazione in piano
+        }
+        self.assertEqual(set(destinazioni), {"M", "P", "S"})
+        self.assertEqual(
+            destinazioni["M"], os.path.join(self.sgrossatura, "25040")
+        )
+        self.assertEqual(
+            destinazioni["P"], os.path.join(self.finitura, "25040")
+        )
+        self.assertEqual(destinazioni["P"], destinazioni["S"])
+
+    def test_rulli_modifica_include_mpsrt_e_data(self):
+        piano = self._piano("RULLI", "MODIFICA")
+        self.assertEqual({operazione.variante for operazione in piano}, set("MPSRT"))
+        self.assertTrue(all(
+            operazione.cartella_destinazione
+            == os.path.join(self.modifiche, "25040", "15-09-26")
+            for operazione in piano
+        ))
+
+    def test_rulli_ricambio_ricava_serie_dalla_sorgente(self):
+        sorgente = os.path.join("RULLI", "RICAMBI", "SERIE 25010", "Z30100")
+        self.assertEqual(ricava_serie_ricambio((sorgente,)), "25010")
+        piano = self._piano("RULLI", "RICAMBIO", "30100", (sorgente,))
+        self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
+        self.assertTrue(all(
+            operazione.cartella_destinazione
+            == os.path.join(self.modifiche, "Z30100", "25010")
+            for operazione in piano
+        ))
+
+    def test_accessori_serie(self):
+        piano = self._piano("ACCESSORI", "SERIE")
+        self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
+        self.assertTrue(all(
+            operazione.cartella_destinazione
+            == os.path.join(self.acc_serie, "25040")
+            for operazione in piano
+        ))
+
+    def test_accessori_modifica_include_mpsrt_e_data(self):
+        piano = self._piano("ACCESSORI", "MODIFICA")
+        self.assertEqual({operazione.variante for operazione in piano}, set("MPSRT"))
+        self.assertTrue(all(
+            operazione.cartella_destinazione
+            == os.path.join(self.acc_modifiche, "25040", "15-09-26")
+            for operazione in piano
+        ))
+
+    def test_accessori_ricambio(self):
+        sorgente = os.path.join("RULLI", "RICAMBI", "25010", "Z30100")
+        piano = self._piano("ACCESSORI", "RICAMBIO", "Z30100", (sorgente,))
+        self.assertEqual({operazione.variante for operazione in piano}, set("MPS"))
+        self.assertTrue(all(
+            operazione.cartella_destinazione
+            == os.path.join(self.acc_modifiche, "Z30100", "25010")
+            for operazione in piano
+        ))
+
+    def test_destinazione_temporanea_si_applica_al_piano_selezionato(self):
+        piano = self._piano("RULLI", "MODIFICA")
+        cartella_manual = os.path.join(self.modifiche, "25040", "12-09-26")
+        modificato = applica_destinazione_temporanea(piano, cartella_manual)
+        self.assertEqual(len(modificato), len(piano))
+        self.assertTrue(all(
+            operazione.cartella_destinazione == cartella_manual
+            for operazione in modificato
+        ))
+        self.assertEqual(
+            [operazione.sorgente for operazione in modificato],
+            [operazione.sorgente for operazione in piano],
+        )
+        self.assertNotEqual(
+            modificato[0].cartella_destinazione,
+            piano[0].cartella_destinazione,
+        )
 
 
 if __name__ == "__main__":

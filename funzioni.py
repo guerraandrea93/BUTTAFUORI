@@ -31,25 +31,48 @@ CHIAVI_SORGENTI = tuple(
     for combinazione in CHIAVI_COMBINAZIONI
     for indice in (1, 2)
 )
-CHIAVI_TORNI = tuple(f"TORNI_{nome}" for nome in CHIAVI_SORGENTI)
+CHIAVI_TORNI = (
+    "TORNI_SGROSSATURA",
+    "TORNI_FINITURA",
+    "TORNI_MODIFICHE",
+    "TORNI_ACC_SERIE",
+    "TORNI_ACC_MODIFICHE",
+)
+ETICHETTE_TORNI = {
+    "TORNI_SGROSSATURA": "TORNIO / SGROSSATURA",
+    "TORNI_FINITURA": "TORNIO / FINITURA",
+    "TORNI_MODIFICHE": "TORNIO / MODIFICHE",
+    "TORNI_ACC_SERIE": "TORNIO / ACC / SERIE",
+    "TORNI_ACC_MODIFICHE": "TORNIO / ACC / MODIFICHE",
+}
 
 
 def salva_percorsi(percorsi: dict[str, str]) -> None:
     """Salva i percorsi applicativi nel file INI locale."""
     config = configparser.ConfigParser()
-    config["PERCORSI"] = {nome: percorsi[nome] for nome in (*CHIAVI_SORGENTI, *CHIAVI_TORNI)}
+    config["PERCORSI"] = {
+        nome: percorsi[nome] for nome in (*CHIAVI_SORGENTI, *CHIAVI_TORNI)
+    }
     with open(PERCORSO_CONFIG, "w", encoding="utf-8") as config_file:
         config.write(config_file)
 
 
+def _primo_percorso(config, chiavi, fallback):
+    for chiave in chiavi:
+        valore = config.get("PERCORSI", chiave, fallback="").strip()
+        if valore:
+            return valore
+    return fallback
+
+
 def inizializza_percorsi() -> dict[str, str]:
-    """Legge i percorsi dal file INI, creandolo con i valori predefiniti."""
+    """Legge i percorsi e migra le precedenti chiavi TORNI quando possibile."""
     config = configparser.ConfigParser()
     if os.path.isfile(PERCORSO_CONFIG):
         config.read(PERCORSO_CONFIG, encoding="utf-8")
     radice_rulli = config.get("PERCORSI", "RULLI", fallback=PERCORSO_RULLI)
-    radice_torni = config.get("PERCORSI", "TORNI", fallback=PERCORSO_TORNIO)
-    predefiniti = {
+    radice_torni = config.get("PERCORSI", "TORNIO", fallback=PERCORSO_TORNIO)
+    predefiniti_sorgenti = {
         "RULLI_SERIE": radice_rulli,
         "RULLI_MODIFICA": radice_rulli,
         "RULLI_RICAMBIO": os.path.join(radice_rulli, "RICAMBI", "SERIE"),
@@ -59,16 +82,41 @@ def inizializza_percorsi() -> dict[str, str]:
     }
     percorsi = {
         f"{nome}_1": config.get("PERCORSI", nome, fallback=percorso)
-        for nome, percorso in predefiniti.items()
+        for nome, percorso in predefiniti_sorgenti.items()
     }
-    percorsi.update({
-        f"{nome}_2": "" for nome in CHIAVI_COMBINAZIONI
-    })
-    percorsi.update({f"TORNI_{nome}_1": radice_torni for nome in CHIAVI_COMBINAZIONI})
-    percorsi.update({f"TORNI_{nome}_2": "" for nome in CHIAVI_COMBINAZIONI})
+    percorsi.update({f"{nome}_2": "" for nome in CHIAVI_COMBINAZIONI})
     if config.has_section("PERCORSI"):
-        for nome in (*CHIAVI_SORGENTI, *CHIAVI_TORNI):
+        for nome in CHIAVI_SORGENTI:
             percorsi[nome] = config.get("PERCORSI", nome, fallback=percorsi[nome])
+
+    predefiniti_torni = {
+        "TORNI_SGROSSATURA": _primo_percorso(
+            config,
+            ("TORNI_SGROSSATURA", "TORNI_RULLI_SGROSSATURA"),
+            os.path.join(radice_torni, "SGROSSATURA"),
+        ),
+        "TORNI_FINITURA": _primo_percorso(
+            config,
+            ("TORNI_FINITURA", "TORNI_RULLI_FINITURA"),
+            os.path.join(radice_torni, "FINITURA"),
+        ),
+        "TORNI_MODIFICHE": _primo_percorso(
+            config,
+            ("TORNI_MODIFICHE", "TORNI_RULLI_MODIFICHE", "TORNI_RULLI_RICAMBI"),
+            os.path.join(radice_torni, "MODIFICHE"),
+        ),
+        "TORNI_ACC_SERIE": _primo_percorso(
+            config,
+            ("TORNI_ACC_SERIE",),
+            os.path.join(radice_torni, "ACC", "SERIE"),
+        ),
+        "TORNI_ACC_MODIFICHE": _primo_percorso(
+            config,
+            ("TORNI_ACC_MODIFICHE",),
+            os.path.join(radice_torni, "ACC", "MODIFICHE"),
+        ),
+    }
+    percorsi.update(predefiniti_torni)
     if not os.path.isfile(PERCORSO_CONFIG):
         salva_percorsi(percorsi)
     return percorsi
